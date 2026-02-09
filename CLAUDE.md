@@ -105,12 +105,19 @@ Do not add "Generated with Claude Code" footers or "Co-Authored-By" trailers to 
 
 ## Running as Service (macOS)
 
+Currently running as a LaunchAgent (`com.claude-telegram-ts`).
+
 ```bash
-cp launchagent/com.claude-telegram-ts.plist.template ~/Library/LaunchAgents/com.claude-telegram-ts.plist
-# Edit plist with your paths
-launchctl load ~/Library/LaunchAgents/com.claude-telegram-ts.plist
+# Restart
+launchctl kickstart -k gui/$(id -u)/com.claude-telegram-ts
+
+# Stop
+launchctl bootout gui/$(id -u)/com.claude-telegram-ts
 
 # Logs
-tail -f /tmp/claude-telegram-bot-ts.log
-tail -f /tmp/claude-telegram-bot-ts.err
+tail -f /tmp/claude-telegram-bot.log
+tail -f /tmp/claude-telegram-bot.err
 ```
+
+Plist: `~/Library/LaunchAgents/com.claude-telegram-ts.plist`
+Agent workspace: `~/Programming_Projects/claude-telegram-bot/` (CLAUDE_WORKING_DIR)
