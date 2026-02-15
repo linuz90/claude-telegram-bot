@@ -31,6 +31,7 @@ To achieve this, I set up a folder with a CLAUDE.md that teaches Claude about me
 - 📨 **Message queuing**: Send multiple messages while Claude works - they queue up automatically. Prefix with `!` or use `/stop` to interrupt and send immediately
 - 🧠 **Extended thinking**: Trigger Claude's reasoning by using words like "think" or "reason" - you'll see its thought process as it works (configurable via `THINKING_TRIGGER_KEYWORDS`)
 - 🔘 **Interactive buttons**: Claude can present options as tappable inline buttons via the built-in `ask_user` MCP tool
+- 📎 **File delivery**: Claude can send files (images, videos, audio, documents) back to the chat via the `send_file` MCP tool
 
 ## Quick Start
 
@@ -127,7 +128,11 @@ cp mcp-config.ts mcp-config.local.ts
 # Edit mcp-config.local.ts with your MCP servers
 ```
 
-The bot includes a built-in `ask_user` MCP server that lets Claude present options as tappable inline keyboard buttons. Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools.
+The bot includes two built-in MCP servers:
+- **`ask_user`** — Lets Claude present options as tappable inline keyboard buttons
+- **`send_file`** — Lets Claude send files (images, videos, audio, documents) back to the chat
+
+Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools.
 
 ## Bot Commands
 

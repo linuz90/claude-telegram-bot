@@ -24,7 +24,10 @@ import {
   WORKING_DIR,
 } from "./config";
 import { formatToolStatus } from "./formatting";
-import { checkPendingAskUserRequests } from "./handlers/streaming";
+import {
+  checkPendingAskUserRequests,
+  checkPendingSendFileRequests,
+} from "./handlers/streaming";
 import { checkCommandSafety, isPathAllowed } from "./security";
 import type {
   SavedSession,
@@ -350,8 +353,11 @@ class ClaudeSession {
               this.lastTool = toolDisplay;
               console.log(`Tool: ${toolDisplay}`);
 
-              // Don't show tool status for ask_user - the buttons are self-explanatory
-              if (!toolName.startsWith("mcp__ask-user")) {
+              // Don't show tool status for ask_user/send_file - they handle their own UI
+              if (
+                !toolName.startsWith("mcp__ask-user") &&
+                !toolName.startsWith("mcp__send-file")
+              ) {
                 await statusCallback("tool", toolDisplay);
               }
 
@@ -374,6 +380,19 @@ class ClaudeSession {
                     await new Promise((resolve) => setTimeout(resolve, 100));
                   }
                 }
+              }
+
+              // Send file to user after send-file MCP tool (fire-and-forget)
+              if (toolName.startsWith("mcp__send-file") && ctx && chatId) {
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  const sent = await checkPendingSendFileRequests(ctx, chatId);
+                  if (sent) break;
+                  if (attempt < 2) {
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                  }
+                }
+                // NO break — Claude continues generating
               }
             }
 

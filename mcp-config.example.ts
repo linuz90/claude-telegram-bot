@@ -26,6 +26,13 @@ export const MCP_SERVERS: Record<
   //   args: ["run", `${REPO_ROOT}/ask_user_mcp/server.ts`]
   // },
 
+  // Send File - send files (images, videos, audio, documents) back to the user
+  // Uncomment to enable file delivery via Telegram
+  // "send-file": {
+  //   command: "bun",
+  //   args: ["run", `${REPO_ROOT}/send_file_mcp/server.ts`]
+  // },
+
   // Example: Typefully - draft and schedule social posts
   // Docs: https://support.typefully.com/en/articles/13128440-typefully-mcp-server
   // "typefully": {
