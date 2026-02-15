@@ -4,9 +4,10 @@
  * Provides a reusable status callback for streaming Claude responses.
  */
 
+import { unlinkSync } from "fs";
 import type { Context } from "grammy";
 import type { Message } from "grammy/types";
-import { InlineKeyboard } from "grammy";
+import { InlineKeyboard, InputFile } from "grammy";
 import type { StatusCallback } from "../types";
 import { convertMarkdownToHtml, escapeHtml } from "../formatting";
 import {
@@ -77,6 +78,72 @@ export async function checkPendingAskUserRequests(
   }
 
   return buttonsSent;
+}
+
+// File extensions grouped by Telegram send method
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".webm", ".mkv"]);
+const PHOTO_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a"]);
+
+/**
+ * Check for pending send-file requests and deliver files via Telegram.
+ */
+export async function checkPendingSendFileRequests(
+  ctx: Context,
+  chatId: number
+): Promise<boolean> {
+  const glob = new Bun.Glob("send-file-*.json");
+  let fileSent = false;
+
+  for await (const filename of glob.scan({ cwd: "/tmp", absolute: false })) {
+    const filepath = `/tmp/${filename}`;
+    try {
+      const file = Bun.file(filepath);
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      // Only process pending requests for this chat
+      if (data.status !== "pending") continue;
+      if (String(data.chat_id) !== String(chatId)) continue;
+
+      const filePath: string = data.file_path || "";
+      const caption: string | undefined = data.caption || undefined;
+
+      if (!filePath) {
+        try { unlinkSync(filepath); } catch { /* ignore */ }
+        continue;
+      }
+
+      try {
+        const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+        const inputFile = new InputFile(filePath);
+
+        if (VIDEO_EXTENSIONS.has(ext)) {
+          await ctx.replyWithVideo(inputFile, { caption });
+        } else if (PHOTO_EXTENSIONS.has(ext)) {
+          await ctx.replyWithPhoto(inputFile, { caption });
+        } else if (AUDIO_EXTENSIONS.has(ext)) {
+          await ctx.replyWithAudio(inputFile, { caption });
+        } else {
+          await ctx.replyWithDocument(inputFile, { caption });
+        }
+
+        fileSent = true;
+      } catch (sendError) {
+        console.error(`Failed to send file ${filePath}:`, sendError);
+        await ctx.reply(
+          `Failed to send file: ${filePath.split("/").pop() || "unknown"}`
+        );
+      }
+
+      // Always clean up the request file
+      try { unlinkSync(filepath); } catch { /* ignore */ }
+    } catch (error) {
+      console.warn(`Failed to process send-file request ${filepath}:`, error);
+    }
+  }
+
+  return fileSent;
 }
 
 /**
