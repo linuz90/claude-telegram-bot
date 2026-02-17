@@ -1,9 +1,9 @@
-# Claude Telegram Bot
+# Claude/Codex Telegram Bot
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-1.0+-black.svg)](https://bun.sh/)
 
-**Turn [Claude Code](https://claude.com/product/claude-code) into your personal assistant, accessible from anywhere via Telegram.**
+**Turn [Claude Code](https://claude.com/product/claude-code) or Codex into your personal assistant, accessible from anywhere via Telegram.**
 
 Send text, voice, photos, documents, audio, and video. See responses and tools usage in real-time.
 
@@ -22,7 +22,7 @@ To achieve this, I set up a folder with a CLAUDE.md that teaches Claude about me
 ## Bot Features
 
 - 💬 **Text**: Ask questions, give instructions, have conversations
-- 🎤 **Voice**: Speak naturally - transcribed via OpenAI and processed by Claude
+- 🎤 **Voice**: Speak naturally - transcribed via OpenAI and processed by the selected assistant
 - 📸 **Photos**: Send screenshots, documents, or anything visual for analysis
 - 📄 **Documents**: PDFs, text files, and archives (ZIP, TAR) are extracted and analyzed
 - 🎵 **Audio**: Audio files (mp3, m4a, ogg, wav, etc.) are transcribed via OpenAI and processed
@@ -43,14 +43,32 @@ cp .env.example .env
 
 bun install
 bun run src/index.ts
+# or directly start in Codex mode
+bun run start:codex
 ```
 
 ### Prerequisites
 
 - **Bun 1.0+** - [Install Bun](https://bun.sh/)
-- **Claude Agent SDK** - `@anthropic-ai/claude-agent-sdk` (installed via bun install)
+- **Claude Agent SDK** - `@anthropic-ai/claude-agent-sdk` (for Claude mode)
+- **Codex SDK** - `@openai/codex-sdk` (for Codex mode, installed via bun install)
 - **Telegram Bot Token** from [@BotFather](https://t.me/BotFather)
 - **OpenAI API Key** (optional, for voice transcription)
+
+### Assistant Selection
+
+Choose which assistant powers the bot:
+
+```bash
+# .env
+AI_ASSISTANT=claude   # or codex
+```
+
+If `AI_ASSISTANT=codex`, authenticate once on the host machine:
+
+```bash
+codex login
+```
 
 ### Claude Authentication
 
@@ -84,9 +102,12 @@ Then send `/setcommands` to BotFather and paste this:
 ```
 start - Show status and user ID
 new - Start a fresh session
+policy - Show runtime policy
+model - Switch assistant/model
+assistant - Alias for /model
 resume - Pick from recent sessions to resume
 stop - Interrupt current query
-status - Check what Claude is doing
+status - Check what the bot is doing
 restart - Restart the bot
 ```
 
@@ -100,15 +121,23 @@ TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF...   # From @BotFather
 TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
 
 # Recommended
-CLAUDE_WORKING_DIR=/path/to/your/folder    # Where Claude runs (loads CLAUDE.md, skills, MCP)
+AI_WORKING_DIR=/path/to/your/folder        # Where the assistant runs (loads CLAUDE.md, skills, MCP)
+AI_ASSISTANT=claude                        # or codex
+CLAUDE_MODEL=claude-opus-4-6
+CODEX_MODEL=gpt-5.3-codex
+CODEX_REASONING_EFFORT=medium             # minimal | low | medium | high | xhigh
+CODEX_SANDBOX_MODE=workspace-write        # read-only | workspace-write | danger-full-access
+CODEX_APPROVAL_POLICY=never               # never | on-request | on-failure | untrusted
+CODEX_NETWORK_ACCESS_ENABLED=true
+CODEX_WEB_SEARCH_MODE=live                # disabled | cached | live
 OPENAI_API_KEY=sk-...                      # For voice transcription
 ```
 
 **Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram.
 
-**File access paths:** By default, Claude can access:
+**File access paths:** By default, the assistant can access:
 
-- `CLAUDE_WORKING_DIR` (or home directory if not set)
+- `AI_WORKING_DIR` / `CLAUDE_WORKING_DIR` (or home directory if not set)
 - `~/Documents`, `~/Downloads`, `~/Desktop`
 - `~/.claude` (for Claude Code plans and settings)
 
@@ -135,10 +164,23 @@ The bot includes a built-in `ask_user` MCP server that lets Claude present optio
 | ---------- | --------------------------------- |
 | `/start`   | Show status and your user ID      |
 | `/new`     | Start a fresh session             |
+| `/policy`  | Show runtime policy               |
+| `/model`   | Switch assistant/model            |
+| `/assistant` | Alias for `/model`              |
 | `/resume`  | Pick from last 5 sessions to resume (with recap) |
 | `/stop`    | Interrupt current query           |
-| `/status`  | Check what Claude is doing        |
+| `/status`  | Check what the bot is doing       |
 | `/restart` | Restart the bot                   |
+
+Model switch format (canonical):
+
+```text
+/model opus 4.6
+/model sonnet 4.5
+/model codex 5.3 low
+/model codex 5.3 medium
+/model codex 5.3 high
+```
 
 ## Running as a Service (macOS)
 
@@ -174,6 +216,10 @@ alias cbot-logs='tail -f /tmp/claude-telegram-bot-ts.log'
 ```bash
 # Run with auto-reload
 bun --watch run src/index.ts
+
+# Run in Codex mode
+bun run start:codex
+bun run dev:codex
 
 # Type check
 bun run typecheck

@@ -5,7 +5,7 @@
  */
 
 import { homedir } from "os";
-import { resolve, dirname } from "path";
+import { resolve, dirname, isAbsolute } from "path";
 import type { McpServerConfig } from "./types";
 
 // ============== Environment Setup ==============
@@ -42,8 +42,88 @@ export const ALLOWED_USERS: number[] = (
   .map((x) => parseInt(x.trim(), 10))
   .filter((x) => !isNaN(x));
 
-export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
+// Keep backward compatibility with CLAUDE_WORKING_DIR while allowing a generic
+// AI_WORKING_DIR for multi-assistant setups (Claude + Codex).
+export const WORKING_DIR =
+  process.env.AI_WORKING_DIR || process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+export const CLAUDE_ENABLE_CHROME =
+  (process.env.CLAUDE_ENABLE_CHROME || "false").toLowerCase() === "true";
+export const AI_ASSISTANT: "claude" | "codex" =
+  (process.env.AI_ASSISTANT || "claude").toLowerCase() === "codex"
+    ? "codex"
+    : "claude";
+export const CLAUDE_MODEL =
+  process.env.CLAUDE_MODEL || "claude-opus-4-6";
+export type ClaudeReasoningEffort = "low" | "medium" | "high";
+const claudeEffortRaw = (process.env.CLAUDE_REASONING_EFFORT || "high")
+  .toLowerCase()
+  .trim();
+export const CLAUDE_REASONING_EFFORT: ClaudeReasoningEffort =
+  claudeEffortRaw === "low" ||
+  claudeEffortRaw === "medium" ||
+  claudeEffortRaw === "high"
+    ? claudeEffortRaw
+    : "high";
+export const CODEX_MODEL = process.env.CODEX_MODEL || "gpt-5.3-codex";
+export type CodexReasoningEffort =
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
+export type CodexSandboxMode =
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
+export type CodexApprovalPolicy =
+  | "never"
+  | "on-request"
+  | "on-failure"
+  | "untrusted";
+export type CodexWebSearchMode = "disabled" | "cached" | "live";
+const codexEffortRaw = (process.env.CODEX_REASONING_EFFORT || "medium")
+  .toLowerCase()
+  .trim();
+export const CODEX_REASONING_EFFORT: CodexReasoningEffort =
+  codexEffortRaw === "minimal" ||
+  codexEffortRaw === "low" ||
+  codexEffortRaw === "medium" ||
+  codexEffortRaw === "high" ||
+  codexEffortRaw === "xhigh"
+    ? codexEffortRaw
+    : "medium";
+const codexSandboxRaw = (process.env.CODEX_SANDBOX_MODE || "workspace-write")
+  .toLowerCase()
+  .trim();
+export const CODEX_SANDBOX_MODE: CodexSandboxMode =
+  codexSandboxRaw === "read-only" ||
+  codexSandboxRaw === "workspace-write" ||
+  codexSandboxRaw === "danger-full-access"
+    ? codexSandboxRaw
+    : "workspace-write";
+const codexApprovalRaw = (process.env.CODEX_APPROVAL_POLICY || "never")
+  .toLowerCase()
+  .trim();
+export const CODEX_APPROVAL_POLICY: CodexApprovalPolicy =
+  codexApprovalRaw === "never" ||
+  codexApprovalRaw === "on-request" ||
+  codexApprovalRaw === "on-failure" ||
+  codexApprovalRaw === "untrusted"
+    ? codexApprovalRaw
+    : "never";
+export const CODEX_NETWORK_ACCESS_ENABLED =
+  (process.env.CODEX_NETWORK_ACCESS_ENABLED || "true").toLowerCase() ===
+  "true";
+const codexWebSearchRaw = (process.env.CODEX_WEB_SEARCH_MODE || "live")
+  .toLowerCase()
+  .trim();
+export const CODEX_WEB_SEARCH_MODE: CodexWebSearchMode =
+  codexWebSearchRaw === "disabled" ||
+  codexWebSearchRaw === "cached" ||
+  codexWebSearchRaw === "live"
+    ? codexWebSearchRaw
+    : "live";
 
 // ============== Claude CLI Path ==============
 
@@ -85,22 +165,56 @@ export { MCP_SERVERS };
 
 // ============== Security Configuration ==============
 
-// Allowed directories for file operations
-const defaultAllowedPaths = [
-  WORKING_DIR,
-  `${HOME}/Documents`,
-  `${HOME}/Downloads`,
-  `${HOME}/Desktop`,
-  `${HOME}/.claude`, // Claude Code data (plans, settings)
-];
+function normalizeAllowedPath(rawPath: string): string | null {
+  const value = rawPath.trim();
+  if (!value) return null;
+  const expanded = value.replace(/^~(?=\/|$)/, HOME);
+  return isAbsolute(expanded)
+    ? resolve(expanded)
+    : resolve(WORKING_DIR, expanded);
+}
 
-const allowedPathsStr = process.env.ALLOWED_PATHS || "";
-export const ALLOWED_PATHS: string[] = allowedPathsStr
-  ? allowedPathsStr
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean)
-  : defaultAllowedPaths;
+function parseAllowedPaths(rawValue: string): string[] {
+  return rawValue
+    .split(",")
+    .map((path) => normalizeAllowedPath(path))
+    .filter((path): path is string => Boolean(path));
+}
+
+function dedupePaths(paths: string[]): string[] {
+  return Array.from(new Set(paths));
+}
+
+// Allowed directories for file operations.
+// Defaults are intentionally narrow; use ALLOWED_PATHS_EXTRA / _REMOVE to tune.
+const defaultAllowedPaths = dedupePaths(
+  [
+    WORKING_DIR,
+    `${HOME}/Programming_Projects`,
+    `${HOME}/.claude`, // Claude Code data (plans, settings)
+    `${HOME}/.codex`, // Codex auth/session data
+  ]
+    .map((path) => normalizeAllowedPath(path))
+    .filter((path): path is string => Boolean(path))
+);
+
+const allowedPathsOverride = parseAllowedPaths(process.env.ALLOWED_PATHS || "");
+const allowedPathsExtra = parseAllowedPaths(process.env.ALLOWED_PATHS_EXTRA || "");
+const allowedPathsRemove = new Set(
+  parseAllowedPaths(process.env.ALLOWED_PATHS_REMOVE || "")
+);
+const normalizedWorkingDir = normalizeAllowedPath(WORKING_DIR);
+const basePaths =
+  allowedPathsOverride.length > 0 ? allowedPathsOverride : defaultAllowedPaths;
+const mergedPaths = dedupePaths([...basePaths, ...allowedPathsExtra]).filter(
+  (path) => !allowedPathsRemove.has(path)
+);
+
+if (normalizedWorkingDir && !mergedPaths.includes(normalizedWorkingDir)) {
+  mergedPaths.unshift(normalizedWorkingDir);
+}
+
+export const ALLOWED_PATHS: string[] = mergedPaths;
 
 // Build safety prompt dynamically from ALLOWED_PATHS
 function buildSafetyPrompt(allowedPaths: string[]): string {
@@ -154,17 +268,7 @@ const BASE_TRANSCRIPTION_PROMPT = `Transcribe this voice message accurately.
 The speaker may use multiple languages (English, and possibly others).
 Focus on accuracy for proper nouns, technical terms, and commands.`;
 
-let TRANSCRIPTION_CONTEXT = "";
-if (process.env.TRANSCRIPTION_CONTEXT_FILE) {
-  try {
-    const file = Bun.file(process.env.TRANSCRIPTION_CONTEXT_FILE);
-    if (await file.exists()) {
-      TRANSCRIPTION_CONTEXT = (await file.text()).trim();
-    }
-  } catch {
-    // File not found or unreadable — proceed without context
-  }
-}
+const TRANSCRIPTION_CONTEXT = process.env.TRANSCRIPTION_CONTEXT || "";
 
 export const TRANSCRIPTION_PROMPT = TRANSCRIPTION_CONTEXT
   ? `${BASE_TRANSCRIPTION_PROMPT}\n\nAdditional context:\n${TRANSCRIPTION_CONTEXT}`
@@ -194,7 +298,26 @@ export const MEDIA_GROUP_TIMEOUT = 1000; // ms to wait for more photos in a grou
 
 export const TELEGRAM_MESSAGE_LIMIT = 4096; // Max characters per message
 export const TELEGRAM_SAFE_LIMIT = 4000; // Safe limit with buffer for formatting
-export const STREAMING_THROTTLE_MS = 500; // Throttle streaming updates
+// Stream update cadence; lower values show more frequent visible edits in Telegram.
+export const STREAMING_THROTTLE_MS = parseInt(
+  process.env.STREAMING_THROTTLE_MS || "250",
+  10
+);
+// If provider sends only final text (no incremental deltas), simulate progressive edits.
+export const STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS = parseInt(
+  process.env.STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS || "280",
+  10
+);
+export const STREAMING_SYNTHETIC_STEP_CHARS = parseInt(
+  process.env.STREAMING_SYNTHETIC_STEP_CHARS || "220",
+  10
+);
+export const STREAMING_SYNTHETIC_STEP_DELAY_MS = parseInt(
+  process.env.STREAMING_SYNTHETIC_STEP_DELAY_MS || "80",
+  10
+);
+export const STREAMING_DEBUG =
+  (process.env.STREAMING_DEBUG || "false").toLowerCase() === "true";
 export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
 
 // ============== Audit Logging ==============
@@ -244,5 +367,5 @@ if (ALLOWED_USERS.length === 0) {
 }
 
 console.log(
-  `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`
+  `Config loaded: ${ALLOWED_USERS.length} allowed users, assistant: ${AI_ASSISTANT}, working dir: ${WORKING_DIR}`
 );
