@@ -58,6 +58,7 @@ All config via `.env` (copy from `.env.example`). Key variables:
 - `CLAUDE_WORKING_DIR` - Working directory for Claude
 - `ALLOWED_PATHS` - Directories Claude can access
 - `OPENAI_API_KEY` - For voice transcription
+- `CLAUDE_ENABLE_CHROME` - Enables Claude Code native Chrome control (`--chrome`)
 
 MCP servers defined in `mcp-config.ts`.
 
@@ -66,6 +67,24 @@ MCP servers defined in `mcp-config.ts`.
 - `/tmp/claude-telegram-session.json` - Session persistence for `/resume`
 - `/tmp/telegram-bot/` - Downloaded photos/documents
 - `/tmp/claude-telegram-audit.log` - Audit log
+
+### Claude in Chrome Integration
+
+To enable browser control from Telegram:
+
+1. Set `CLAUDE_ENABLE_CHROME=true` in `.env`.
+2. Restart the running bot process (LaunchAgent or manual process).
+3. Ensure Claude Chrome extension is installed and Chrome is running.
+
+If you see "Browser extension isn't connected" while the bot is passing Chrome tools:
+
+- Verify Claude Code host manifest exists:
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json`
+- Check for host conflict with Claude Desktop manifest:
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`
+- If conflict occurs, disable Desktop manifest temporarily and restart Chrome.
+- Verify active host process:
+  `ps aux | rg 'chrome-native-host|claude-agent-sdk/cli.js --chrome-native-host'`
 
 ## Patterns
 

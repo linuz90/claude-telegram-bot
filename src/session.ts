@@ -14,9 +14,14 @@ import { readFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
+  CLAUDE_ENABLE_CHROME,
   MCP_SERVERS,
   SAFETY_PROMPT,
   SESSION_FILE,
+  STREAMING_DEBUG,
+  STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS,
+  STREAMING_SYNTHETIC_STEP_CHARS,
+  STREAMING_SYNTHETIC_STEP_DELAY_MS,
   STREAMING_THROTTLE_MS,
   TEMP_PATHS,
   THINKING_DEEP_KEYWORDS,
@@ -214,6 +219,7 @@ class ClaudeSession {
       allowDangerouslySkipPermissions: true,
       systemPrompt: SAFETY_PROMPT,
       mcpServers: MCP_SERVERS,
+      extraArgs: CLAUDE_ENABLE_CHROME ? { chrome: null } : undefined,
       maxThinkingTokens: thinkingTokens,
       additionalDirectories: ALLOWED_PATHS,
       resume: this.sessionId || undefined,
@@ -257,8 +263,51 @@ class ClaudeSession {
     let currentSegmentId = 0;
     let currentSegmentText = "";
     let lastTextUpdate = 0;
+    let textCallbackCount = 0;
+    let lastEmittedTextLength = 0;
     let queryCompleted = false;
     let askUserTriggered = false;
+    let streamEventCount = 0;
+    let assistantEventCount = 0;
+    let textBlockCount = 0;
+
+    const emitProgressiveTail = async (
+      fullText: string,
+      segmentId: number
+    ): Promise<void> => {
+      if (
+        fullText.length < STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS ||
+        STREAMING_SYNTHETIC_STEP_CHARS <= 0
+      ) {
+        return;
+      }
+
+      const start = Math.max(
+        lastEmittedTextLength + STREAMING_SYNTHETIC_STEP_CHARS,
+        STREAMING_SYNTHETIC_STEP_CHARS
+      );
+
+      if (STREAMING_DEBUG && start < fullText.length) {
+        console.log(
+          `[stream-debug] synthetic tail start=${start} full_len=${fullText.length} step=${STREAMING_SYNTHETIC_STEP_CHARS} delay_ms=${STREAMING_SYNTHETIC_STEP_DELAY_MS}`
+        );
+      }
+      for (
+        let end = start;
+        end < fullText.length;
+        end += STREAMING_SYNTHETIC_STEP_CHARS
+      ) {
+        await statusCallback("text", fullText.slice(0, end), segmentId);
+        textCallbackCount++;
+        lastEmittedTextLength = end;
+
+        if (STREAMING_SYNTHETIC_STEP_DELAY_MS > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, STREAMING_SYNTHETIC_STEP_DELAY_MS)
+          );
+        }
+      }
+    };
 
     try {
       // Use V1 query() API - supports all options including cwd, mcpServers, etc.
@@ -272,6 +321,8 @@ class ClaudeSession {
 
       // Process streaming response
       for await (const event of queryInstance) {
+        streamEventCount++;
+
         // Check for abort
         if (this.stopRequested) {
           console.log("Query aborted by user");
@@ -287,6 +338,8 @@ class ClaudeSession {
 
         // Handle different message types
         if (event.type === "assistant") {
+          assistantEventCount++;
+
           for (const block of event.message.content) {
             // Thinking blocks
             if (block.type === "thinking") {
@@ -379,21 +432,63 @@ class ClaudeSession {
 
             // Text content
             if (block.type === "text") {
+              textBlockCount++;
               responseParts.push(block.text);
               currentSegmentText += block.text;
 
-              // Stream text updates (throttled)
-              const now = Date.now();
+              // Some providers emit the first text block as an already-large final snapshot.
+              // Emit only a short prefix first so Telegram shows visible progression.
               if (
-                now - lastTextUpdate > STREAMING_THROTTLE_MS &&
-                currentSegmentText.length > 20
+                textCallbackCount === 0 &&
+                currentSegmentText.length >=
+                  STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS
               ) {
+                const firstPreviewLen = Math.max(
+                  1,
+                  Math.min(
+                    STREAMING_SYNTHETIC_STEP_CHARS,
+                    currentSegmentText.length - 1
+                  )
+                );
+                await statusCallback(
+                  "text",
+                  currentSegmentText.slice(0, firstPreviewLen),
+                  currentSegmentId
+                );
+                textCallbackCount++;
+                lastEmittedTextLength = firstPreviewLen;
+                lastTextUpdate = Date.now();
+                if (STREAMING_DEBUG) {
+                  console.log(
+                    `[stream-debug] emitted initial prefix seg=${currentSegmentId} len=${firstPreviewLen} total_snapshot_len=${currentSegmentText.length}`
+                  );
+                }
+                continue;
+              }
+
+              // Stream text updates:
+              // - Always emit the first chunk immediately.
+              // - Then throttle subsequent edits to avoid Telegram flood limits.
+              const now = Date.now();
+              const shouldEmitText =
+                textCallbackCount === 0 ||
+                now - lastTextUpdate >= STREAMING_THROTTLE_MS;
+
+              if (shouldEmitText) {
                 await statusCallback(
                   "text",
                   currentSegmentText,
                   currentSegmentId
                 );
                 lastTextUpdate = now;
+                textCallbackCount++;
+                lastEmittedTextLength = currentSegmentText.length;
+
+                if (STREAMING_DEBUG) {
+                  console.log(
+                    `[stream-debug] emitted text update seg=${currentSegmentId} len=${currentSegmentText.length} block_len=${block.text.length}`
+                  );
+                }
               }
             }
           }
@@ -408,6 +503,12 @@ class ClaudeSession {
         if (event.type === "result") {
           console.log("Response complete");
           queryCompleted = true;
+
+          if (STREAMING_DEBUG) {
+            console.log(
+              `[stream-debug] summary events=${streamEventCount} assistant_events=${assistantEventCount} text_blocks=${textBlockCount} text_updates=${textCallbackCount} segment_len=${currentSegmentText.length}`
+            );
+          }
 
           // Capture usage if available
           if ("usage" in event && event.usage) {
@@ -458,6 +559,7 @@ class ClaudeSession {
 
     // Emit final segment
     if (currentSegmentText) {
+      await emitProgressiveTail(currentSegmentText, currentSegmentId);
       await statusCallback("segment_end", currentSegmentText, currentSegmentId);
     }
 

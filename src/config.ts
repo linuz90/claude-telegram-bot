@@ -44,6 +44,8 @@ export const ALLOWED_USERS: number[] = (
 
 export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+export const CLAUDE_ENABLE_CHROME =
+  (process.env.CLAUDE_ENABLE_CHROME || "false").toLowerCase() === "true";
 
 // ============== Claude CLI Path ==============
 
@@ -184,7 +186,26 @@ export const MEDIA_GROUP_TIMEOUT = 1000; // ms to wait for more photos in a grou
 
 export const TELEGRAM_MESSAGE_LIMIT = 4096; // Max characters per message
 export const TELEGRAM_SAFE_LIMIT = 4000; // Safe limit with buffer for formatting
-export const STREAMING_THROTTLE_MS = 500; // Throttle streaming updates
+// Stream update cadence; lower values show more frequent visible edits in Telegram.
+export const STREAMING_THROTTLE_MS = parseInt(
+  process.env.STREAMING_THROTTLE_MS || "250",
+  10
+);
+// If provider sends only final text (no incremental deltas), simulate progressive edits.
+export const STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS = parseInt(
+  process.env.STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS || "280",
+  10
+);
+export const STREAMING_SYNTHETIC_STEP_CHARS = parseInt(
+  process.env.STREAMING_SYNTHETIC_STEP_CHARS || "220",
+  10
+);
+export const STREAMING_SYNTHETIC_STEP_DELAY_MS = parseInt(
+  process.env.STREAMING_SYNTHETIC_STEP_DELAY_MS || "80",
+  10
+);
+export const STREAMING_DEBUG =
+  (process.env.STREAMING_DEBUG || "false").toLowerCase() === "true";
 export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
 
 // ============== Audit Logging ==============

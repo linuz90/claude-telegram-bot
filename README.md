@@ -116,6 +116,36 @@ To customize, set `ALLOWED_PATHS` in `.env` (comma-separated). Note: this **over
 ALLOWED_PATHS=/your/project,/other/path,~/.claude
 ```
 
+### 2.1 Claude in Chrome (Claude Code Browser Control)
+
+To let Telegram requests use Claude's native Chrome control:
+
+```bash
+# .env
+CLAUDE_ENABLE_CHROME=true
+```
+
+Then restart the bot process so the env change is loaded:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.claude-telegram-ts
+# or run manually with bun run start
+```
+
+Requirements:
+
+- Install the Claude Chrome extension: `https://claude.ai/chrome`
+- Use Google Chrome (not other Chromium browsers)
+- Keep Chrome running
+
+If Chrome control still says "extension isn't connected", check native host conflict:
+
+- Keep this manifest: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_code_browser_extension.json`
+- If needed, temporarily disable Desktop host manifest and restart Chrome:
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json`
+- Confirm the active native host process is Claude Code host:
+  `ps aux | rg 'chrome-native-host|claude-agent-sdk/cli.js --chrome-native-host'`
+
 ### 3. Configure MCP Servers (Optional)
 
 Copy and edit the MCP config:
