@@ -198,8 +198,8 @@ CODEX_NETWORK_ACCESS_ENABLED=true
 CODEX_WEB_SEARCH_MODE=live                # disabled | cached | live
 OPENAI_API_KEY=sk-...                      # For voice transcription
 
-# Optional runtime root (defaults to AI_WORKING_DIR/.runtime)
-AI_RUNTIME_DIR=/path/to/this/repo/workspace/.runtime
+# Optional runtime root (defaults to AI_WORKING_DIR/sessions)
+AI_RUNTIME_DIR=/path/to/this/repo/workspace/sessions
 ```
 
 **Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram.

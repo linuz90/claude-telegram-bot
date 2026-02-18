@@ -33,7 +33,7 @@ import {
   type CodexReasoningEffort,
   MCP_SERVERS,
   SAFETY_PROMPT,
-  LEGACY_SESSION_FILE,
+  LEGACY_SESSION_FILES,
   SESSION_FILE,
   STREAMING_DEBUG,
   STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS,
@@ -1196,7 +1196,7 @@ class ClaudeSession {
    */
   private loadSessionHistory(): SessionHistory {
     const sessionFiles = Array.from(
-      new Set([SESSION_FILE, LEGACY_SESSION_FILE])
+      new Set([SESSION_FILE, ...LEGACY_SESSION_FILES])
     );
 
     for (const sessionFile of sessionFiles) {

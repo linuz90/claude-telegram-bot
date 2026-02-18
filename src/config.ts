@@ -224,8 +224,13 @@ if (normalizedWorkingDir && !mergedPaths.includes(normalizedWorkingDir)) {
 
 export const ALLOWED_PATHS: string[] = mergedPaths;
 
-// Build safety prompt dynamically from ALLOWED_PATHS
-function buildSafetyPrompt(allowedPaths: string[]): string {
+// Build safety prompt dynamically from allowed paths and runtime/session paths.
+function buildSafetyPrompt(
+  allowedPaths: string[],
+  sessionFile: string,
+  runtimeDir: string,
+  tempDir: string
+): string {
   const pathsList = allowedPaths
     .map((p) => `   - ${p} (and subdirectories)`)
     .join("\n");
@@ -249,11 +254,15 @@ ${pathsList}
 
 4. For any destructive or irreversible action, ALWAYS ask for confirmation first.
 
+5. Runtime/session files are stored here:
+   - Session history for /resume: ${sessionFile}
+   - Runtime root: ${runtimeDir}
+   - Temporary media downloads: ${tempDir}
+   - If the user asks where sessions are, report this exact location.
+
 You are running via Telegram, so the user cannot easily undo mistakes. Be extra careful!
 `;
 }
-
-export const SAFETY_PROMPT = buildSafetyPrompt(ALLOWED_PATHS);
 
 // Dangerous command patterns to block
 export const BLOCKED_PATTERNS = [
@@ -341,8 +350,9 @@ export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
 // ============== Audit Logging ==============
 
 export const RUNTIME_DIR = resolveFromWorkingDir(
-  process.env.AI_RUNTIME_DIR || process.env.CLAUDE_RUNTIME_DIR || ".runtime"
+  process.env.AI_RUNTIME_DIR || process.env.CLAUDE_RUNTIME_DIR || "sessions"
 );
+export const LEGACY_RUNTIME_DIR = resolveFromWorkingDir(".runtime");
 export const AUDIT_LOG_PATH =
   process.env.AUDIT_LOG_PATH || `${RUNTIME_DIR}/claude-telegram-audit.log`;
 export const AUDIT_LOG_JSON =
@@ -366,12 +376,23 @@ export const RATE_LIMIT_WINDOW = parseInt(
 export const SESSION_FILE = resolveFromWorkingDir(
   process.env.AI_SESSION_FILE || `${RUNTIME_DIR}/claude-telegram-session.json`
 );
-export const LEGACY_SESSION_FILE = "/tmp/claude-telegram-session.json";
+export const LEGACY_SESSION_FILES = Array.from(
+  new Set([
+    `${LEGACY_RUNTIME_DIR}/claude-telegram-session.json`,
+    "/tmp/claude-telegram-session.json",
+  ])
+);
 export const RESTART_FILE = resolveFromWorkingDir(
   process.env.AI_RESTART_FILE || `${RUNTIME_DIR}/claude-telegram-restart.json`
 );
 export const TEMP_DIR = resolveFromWorkingDir(
   process.env.AI_TEMP_DIR || `${RUNTIME_DIR}/telegram-bot`
+);
+export const SAFETY_PROMPT = buildSafetyPrompt(
+  ALLOWED_PATHS,
+  SESSION_FILE,
+  RUNTIME_DIR,
+  TEMP_DIR
 );
 
 // Temp paths that are always allowed for bot operations
