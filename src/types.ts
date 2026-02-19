@@ -24,6 +24,9 @@ export interface SavedSession {
   saved_at: string;
   working_dir: string;
   title: string; // First message truncated (max ~50 chars)
+  assistant?: "claude" | "codex";
+  model?: string;
+  codex_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 export interface SessionHistory {

@@ -1,8 +1,12 @@
 /**
- * Session management for Claude Telegram Bot.
+ * Session management for the Telegram bot.
  *
- * ClaudeSession class manages Claude Code sessions using the Agent SDK V1.
- * V1 supports full options (cwd, mcpServers, settingSources, etc.)
+ * The session wrapper supports:
+ * - Claude Code via Anthropic Agent SDK
+ * - Codex via @openai/codex-sdk
+ *
+ * We intentionally keep one shared session abstraction so all handlers
+ * (text/voice/photo/document/callback) continue to use the same API.
  */
 
 import {
@@ -10,13 +14,31 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { Codex } from "@openai/codex-sdk";
 import { readFileSync } from "fs";
 import type { Context } from "grammy";
 import {
+  AI_ASSISTANT,
   ALLOWED_PATHS,
+  CLAUDE_ENABLE_CHROME,
+  CLAUDE_REASONING_EFFORT,
+  CLAUDE_MODEL,
+  CODEX_APPROVAL_POLICY,
+  CODEX_MODEL,
+  CODEX_NETWORK_ACCESS_ENABLED,
+  CODEX_REASONING_EFFORT,
+  CODEX_SANDBOX_MODE,
+  CODEX_WEB_SEARCH_MODE,
+  type ClaudeReasoningEffort,
+  type CodexReasoningEffort,
   MCP_SERVERS,
   SAFETY_PROMPT,
+  LEGACY_SESSION_FILES,
   SESSION_FILE,
+  STREAMING_DEBUG,
+  STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS,
+  STREAMING_SYNTHETIC_STEP_CHARS,
+  STREAMING_SYNTHETIC_STEP_DELAY_MS,
   STREAMING_THROTTLE_MS,
   TEMP_PATHS,
   THINKING_DEEP_KEYWORDS,
@@ -36,21 +58,25 @@ import type {
 /**
  * Determine thinking token budget based on message keywords.
  */
-function getThinkingLevel(message: string): number {
+function getThinkingLevel(
+  message: string,
+  defaultEffort: ClaudeReasoningEffort
+): number {
   const msgLower = message.toLowerCase();
+  const baseThinkingTokens =
+    defaultEffort === "high" ? 50000 : defaultEffort === "medium" ? 10000 : 0;
 
   // Check deep thinking triggers first (more specific)
   if (THINKING_DEEP_KEYWORDS.some((k) => msgLower.includes(k))) {
-    return 50000;
+    return Math.max(baseThinkingTokens, 50000);
   }
 
   // Check normal thinking triggers
   if (THINKING_KEYWORDS.some((k) => msgLower.includes(k))) {
-    return 10000;
+    return Math.max(baseThinkingTokens, 10000);
   }
 
-  // Default: no thinking
-  return 0;
+  return baseThinkingTokens;
 }
 
 /**
@@ -73,6 +99,99 @@ function getTextFromMessage(msg: SDKMessage): string | null {
  */
 // Maximum number of sessions to keep in history
 const MAX_SESSIONS = 5;
+type AssistantMode = "claude" | "codex";
+
+function compactToken(value: string): string {
+  return value.toLowerCase().replace(/[\s._-]+/g, "");
+}
+
+function isCodexAlias(base: string): boolean {
+  return compactToken(base) === "codex";
+}
+
+function isCodex53Alias(base: string): boolean {
+  const compact = compactToken(base);
+  return compact === "codex53" || compact === "gpt53codex";
+}
+
+function parseEffortToken(token: string): CodexReasoningEffort | null {
+  const compact = compactToken(token);
+  if (
+    compact === "minimal" ||
+    compact === "low" ||
+    compact === "medium" ||
+    compact === "high" ||
+    compact === "xhigh"
+  ) {
+    return compact;
+  }
+  return null;
+}
+
+function parseClaudeAlias(selection: string): string | null {
+  const compact = compactToken(selection);
+  if (compact === "claude46opus" || compact === "opus46") {
+    return "claude-opus-4-6";
+  }
+  if (compact === "claude45sonnet" || compact === "sonnet45") {
+    return "claude-sonnet-4-5";
+  }
+  return null;
+}
+
+function parseCodexPreset(
+  selection: string
+): { model: string; effort: CodexReasoningEffort } | null {
+  const normalized = selection.toLowerCase().trim();
+
+  // Supports:
+  // - codex 5.3 high
+  // - gpt-5.3-codex medium
+  // - codex high
+  // - codex5.3high
+  const spacedMatch = normalized.match(
+    /^(.*?)[\s_-]+(minimal|low|medium|high|xhigh)$/
+  );
+  if (spacedMatch) {
+    const base = spacedMatch[1]!.trim();
+    const effort = parseEffortToken(spacedMatch[2]!);
+    if (!effort) return null;
+    if (isCodex53Alias(base)) {
+      return { model: "gpt-5.3-codex", effort };
+    }
+    if (isCodexAlias(base)) {
+      return { model: CODEX_MODEL, effort };
+    }
+  }
+
+  const compact = compactToken(selection);
+  const compactMatch = compact.match(
+    /^(codex53|gpt53codex|codex)(minimal|low|medium|high|xhigh)$/
+  );
+  if (!compactMatch) {
+    return null;
+  }
+
+  const effort = parseEffortToken(compactMatch[2]!);
+  if (!effort) {
+    return null;
+  }
+
+  const model = compactMatch[1] === "codex" ? CODEX_MODEL : "gpt-5.3-codex";
+  return { model, effort };
+}
+
+/**
+ * A single Codex client is reused for the process lifetime.
+ * This keeps thread resume behavior consistent and avoids redundant auth bootstrap.
+ */
+let codexClient: Codex | null = null;
+function getCodexClient(): Codex {
+  if (!codexClient) {
+    codexClient = new Codex();
+  }
+  return codexClient;
+}
 
 class ClaudeSession {
   sessionId: string | null = null;
@@ -85,6 +204,11 @@ class ClaudeSession {
   lastUsage: TokenUsage | null = null;
   lastMessage: string | null = null;
   conversationTitle: string | null = null;
+  private assistantMode: AssistantMode = AI_ASSISTANT;
+  private claudeModel = CLAUDE_MODEL;
+  private claudeEffort: ClaudeReasoningEffort = CLAUDE_REASONING_EFFORT;
+  private codexModel = CODEX_MODEL;
+  private codexEffort: CodexReasoningEffort = CODEX_REASONING_EFFORT;
 
   private abortController: AbortController | null = null;
   private isQueryRunning = false;
@@ -98,6 +222,45 @@ class ClaudeSession {
 
   get isRunning(): boolean {
     return this.isQueryRunning || this._isProcessing;
+  }
+
+  get assistant(): AssistantMode {
+    return this.assistantMode;
+  }
+
+  get model(): string {
+    return this.assistantMode === "codex" ? this.codexModel : this.claudeModel;
+  }
+
+  get codexReasoningEffort(): CodexReasoningEffort {
+    return this.codexEffort;
+  }
+
+  get claudeReasoningEffort(): ClaudeReasoningEffort {
+    return this.claudeEffort;
+  }
+
+  get modelDisplay(): string {
+    if (this.assistantMode === "codex") {
+      if (compactToken(this.codexModel) === "gpt53codex") {
+        return `codex 5.3 ${this.codexEffort}`;
+      }
+      return `${this.codexModel} (${this.codexEffort})`;
+    }
+    if (compactToken(this.claudeModel) === "claudeopus46") {
+      return "opus 4.6";
+    }
+    if (compactToken(this.claudeModel) === "claudesonnet45") {
+      return "sonnet 4.5";
+    }
+    return this.claudeModel;
+  }
+
+  get modelDebug(): string {
+    if (this.assistantMode === "codex") {
+      return `${this.codexModel} (${this.codexEffort})`;
+    }
+    return this.claudeModel;
   }
 
   /**
@@ -129,6 +292,88 @@ class ClaudeSession {
   }
 
   /**
+   * Update the active assistant/model at runtime.
+   *
+   * Canonical examples:
+   * - "opus 4.6"
+   * - "sonnet 4.5"
+   * - "codex 5.3 low"
+   * - "codex 5.3 medium"
+   * - "codex 5.3 high"
+   *
+   * Any non-claude value is treated as a Codex model id.
+   * We clear the active session because cross-model resume can corrupt context.
+   */
+  setModel(selectionRaw: string): [success: boolean, message: string] {
+    const selection = selectionRaw.trim();
+    if (!selection) {
+      return [false, "Usage: /model <opus 4.6|sonnet 4.5|codex 5.3 high|...>"];
+    }
+
+    const normalized = selection.toLowerCase();
+    const previousAssistant = this.assistantMode;
+    const previousModel = this.model;
+    const previousCodexEffort = this.codexEffort;
+
+    const codexPreset = parseCodexPreset(selection);
+    const claudeAlias = parseClaudeAlias(selection);
+
+    if (codexPreset) {
+      this.assistantMode = "codex";
+      this.codexModel = codexPreset.model;
+      this.codexEffort = codexPreset.effort;
+    } else if (claudeAlias) {
+      this.assistantMode = "claude";
+      this.claudeModel = claudeAlias;
+    } else if (normalized === "claude") {
+      this.assistantMode = "claude";
+      this.claudeModel = CLAUDE_MODEL;
+    } else if (normalized === "codex") {
+      this.assistantMode = "codex";
+      this.codexModel = CODEX_MODEL;
+      this.codexEffort = CODEX_REASONING_EFFORT;
+    } else if (normalized.startsWith("claude")) {
+      return [
+        false,
+        "Claude models: 'opus 4.6' or 'sonnet 4.5'",
+      ];
+    } else {
+      this.assistantMode = "codex";
+      this.codexModel = selection;
+    }
+
+    const changed =
+      previousAssistant !== this.assistantMode ||
+      previousModel !== this.model ||
+      previousCodexEffort !== this.codexEffort;
+    if (!changed) {
+      return [
+        true,
+        this.assistantMode === "codex"
+          ? `Model unchanged: ${this.modelDisplay} (${this.assistantMode.toUpperCase()})`
+          : `Model unchanged: ${this.modelDisplay} (${this.assistantMode.toUpperCase()})`,
+      ];
+    }
+
+    // Reset active session so we don't attempt to resume with the wrong backend.
+    this.sessionId = null;
+    this.lastActivity = null;
+    this.queryStarted = null;
+    this.currentTool = null;
+    this.lastTool = null;
+    this.lastUsage = null;
+    this.lastError = null;
+    this.lastErrorTime = null;
+
+    return [
+      true,
+      this.assistantMode === "codex"
+        ? `Model switched to ${this.modelDisplay} (${this.assistantMode.toUpperCase()}). Started a fresh session.`
+        : `Model switched to ${this.modelDisplay} (${this.assistantMode.toUpperCase()}). Started a fresh session.`,
+    ];
+  }
+
+  /**
    * Mark processing as started.
    * Returns a cleanup function to call when done.
    */
@@ -149,6 +394,14 @@ class ClaudeSession {
       this.stopRequested = true;
       this.abortController.abort();
       console.log("Stop requested - aborting current query");
+      return "stopped";
+    }
+
+    // Codex streamed turns do not expose an AbortController in this wrapper.
+    // We still honor /stop by setting a flag consumed inside the event loop.
+    if (this.isQueryRunning) {
+      this.stopRequested = true;
+      console.log("Stop requested - will stop current Codex turn");
       return "stopped";
     }
 
@@ -175,13 +428,23 @@ class ClaudeSession {
     chatId?: number,
     ctx?: Context
   ): Promise<string> {
+    if (this.assistantMode === "codex") {
+      return this.sendMessageStreamingCodex(
+        message,
+        username,
+        userId,
+        statusCallback,
+        chatId
+      );
+    }
+
     // Set chat context for ask_user MCP tool
     if (chatId) {
       process.env.TELEGRAM_CHAT_ID = String(chatId);
     }
 
     const isNewSession = !this.isActive;
-    const thinkingTokens = getThinkingLevel(message);
+    const thinkingTokens = getThinkingLevel(message, this.claudeEffort);
     const thinkingLabel =
       { 0: "off", 10000: "normal", 50000: "deep" }[thinkingTokens] ||
       String(thinkingTokens);
@@ -207,13 +470,14 @@ class ClaudeSession {
 
     // Build SDK V1 options - supports all features
     const options: Options = {
-      model: "claude-sonnet-4-5",
+      model: this.claudeModel,
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       systemPrompt: SAFETY_PROMPT,
       mcpServers: MCP_SERVERS,
+      extraArgs: CLAUDE_ENABLE_CHROME ? { chrome: null } : undefined,
       maxThinkingTokens: thinkingTokens,
       additionalDirectories: ALLOWED_PATHS,
       resume: this.sessionId || undefined,
@@ -257,8 +521,51 @@ class ClaudeSession {
     let currentSegmentId = 0;
     let currentSegmentText = "";
     let lastTextUpdate = 0;
+    let textCallbackCount = 0;
+    let lastEmittedTextLength = 0;
     let queryCompleted = false;
     let askUserTriggered = false;
+    let streamEventCount = 0;
+    let assistantEventCount = 0;
+    let textBlockCount = 0;
+
+    const emitProgressiveTail = async (
+      fullText: string,
+      segmentId: number
+    ): Promise<void> => {
+      if (
+        fullText.length < STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS ||
+        STREAMING_SYNTHETIC_STEP_CHARS <= 0
+      ) {
+        return;
+      }
+
+      const start = Math.max(
+        lastEmittedTextLength + STREAMING_SYNTHETIC_STEP_CHARS,
+        STREAMING_SYNTHETIC_STEP_CHARS
+      );
+
+      if (STREAMING_DEBUG && start < fullText.length) {
+        console.log(
+          `[stream-debug] synthetic tail start=${start} full_len=${fullText.length} step=${STREAMING_SYNTHETIC_STEP_CHARS} delay_ms=${STREAMING_SYNTHETIC_STEP_DELAY_MS}`
+        );
+      }
+      for (
+        let end = start;
+        end < fullText.length;
+        end += STREAMING_SYNTHETIC_STEP_CHARS
+      ) {
+        await statusCallback("text", fullText.slice(0, end), segmentId);
+        textCallbackCount++;
+        lastEmittedTextLength = end;
+
+        if (STREAMING_SYNTHETIC_STEP_DELAY_MS > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, STREAMING_SYNTHETIC_STEP_DELAY_MS)
+          );
+        }
+      }
+    };
 
     try {
       // Use V1 query() API - supports all options including cwd, mcpServers, etc.
@@ -272,6 +579,8 @@ class ClaudeSession {
 
       // Process streaming response
       for await (const event of queryInstance) {
+        streamEventCount++;
+
         // Check for abort
         if (this.stopRequested) {
           console.log("Query aborted by user");
@@ -287,6 +596,8 @@ class ClaudeSession {
 
         // Handle different message types
         if (event.type === "assistant") {
+          assistantEventCount++;
+
           for (const block of event.message.content) {
             // Thinking blocks
             if (block.type === "thinking") {
@@ -379,21 +690,63 @@ class ClaudeSession {
 
             // Text content
             if (block.type === "text") {
+              textBlockCount++;
               responseParts.push(block.text);
               currentSegmentText += block.text;
 
-              // Stream text updates (throttled)
-              const now = Date.now();
+              // Some providers emit the first text block as an already-large final snapshot.
+              // Emit only a short prefix first so Telegram shows visible progression.
               if (
-                now - lastTextUpdate > STREAMING_THROTTLE_MS &&
-                currentSegmentText.length > 20
+                textCallbackCount === 0 &&
+                currentSegmentText.length >=
+                  STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS
               ) {
+                const firstPreviewLen = Math.max(
+                  1,
+                  Math.min(
+                    STREAMING_SYNTHETIC_STEP_CHARS,
+                    currentSegmentText.length - 1
+                  )
+                );
+                await statusCallback(
+                  "text",
+                  currentSegmentText.slice(0, firstPreviewLen),
+                  currentSegmentId
+                );
+                textCallbackCount++;
+                lastEmittedTextLength = firstPreviewLen;
+                lastTextUpdate = Date.now();
+                if (STREAMING_DEBUG) {
+                  console.log(
+                    `[stream-debug] emitted initial prefix seg=${currentSegmentId} len=${firstPreviewLen} total_snapshot_len=${currentSegmentText.length}`
+                  );
+                }
+                continue;
+              }
+
+              // Stream text updates:
+              // - Always emit the first chunk immediately.
+              // - Then throttle subsequent edits to avoid Telegram flood limits.
+              const now = Date.now();
+              const shouldEmitText =
+                textCallbackCount === 0 ||
+                now - lastTextUpdate >= STREAMING_THROTTLE_MS;
+
+              if (shouldEmitText) {
                 await statusCallback(
                   "text",
                   currentSegmentText,
                   currentSegmentId
                 );
                 lastTextUpdate = now;
+                textCallbackCount++;
+                lastEmittedTextLength = currentSegmentText.length;
+
+                if (STREAMING_DEBUG) {
+                  console.log(
+                    `[stream-debug] emitted text update seg=${currentSegmentId} len=${currentSegmentText.length} block_len=${block.text.length}`
+                  );
+                }
               }
             }
           }
@@ -408,6 +761,12 @@ class ClaudeSession {
         if (event.type === "result") {
           console.log("Response complete");
           queryCompleted = true;
+
+          if (STREAMING_DEBUG) {
+            console.log(
+              `[stream-debug] summary events=${streamEventCount} assistant_events=${assistantEventCount} text_blocks=${textBlockCount} text_updates=${textCallbackCount} segment_len=${currentSegmentText.length}`
+            );
+          }
 
           // Capture usage if available
           if ("usage" in event && event.usage) {
@@ -458,12 +817,323 @@ class ClaudeSession {
 
     // Emit final segment
     if (currentSegmentText) {
+      await emitProgressiveTail(currentSegmentText, currentSegmentId);
       await statusCallback("segment_end", currentSegmentText, currentSegmentId);
     }
 
     await statusCallback("done", "");
 
     return responseParts.join("") || "No response from Claude.";
+  }
+
+  /**
+   * Send a message to Codex with streaming updates via callback.
+   *
+   * Design notes:
+   * - We keep the same callback contract used by the Claude path so handlers
+   *   and Telegram UX remain unchanged.
+   * - Safety checks are enforced for command execution events before surfacing
+   *   tool updates back to Telegram.
+   */
+  private async sendMessageStreamingCodex(
+    message: string,
+    _username: string,
+    _userId: number,
+    statusCallback: StatusCallback,
+    chatId?: number
+  ): Promise<string> {
+    if (chatId) {
+      process.env.TELEGRAM_CHAT_ID = String(chatId);
+    }
+
+    const isNewSession = !this.isActive;
+
+    // Keep parity with Claude behavior so the agent has deterministic date/time
+    // context on first turn without extra tool calls.
+    let messageToSend = message;
+    if (isNewSession) {
+      const now = new Date();
+      const datePrefix = `[Current date/time: ${now.toLocaleDateString(
+        "en-US",
+        {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZoneName: "short",
+        }
+      )}]\n\n`;
+      messageToSend = datePrefix + message;
+    }
+
+    if (this.sessionId && !isNewSession) {
+      console.log(`RESUMING Codex thread ${this.sessionId.slice(0, 8)}...`);
+    } else {
+      console.log("STARTING new Codex thread");
+      this.sessionId = null;
+    }
+
+    if (this.stopRequested) {
+      console.log(
+        "Query cancelled before starting (stop was requested during processing)"
+      );
+      this.stopRequested = false;
+      throw new Error("Query cancelled");
+    }
+
+    this.abortController = null;
+    this.isQueryRunning = true;
+    this.stopRequested = false;
+    this.queryStarted = new Date();
+    this.currentTool = null;
+
+    const responseParts: string[] = [];
+    let currentSegmentId = 0;
+    let currentSegmentText = "";
+    let lastTextUpdate = 0;
+    let textCallbackCount = 0;
+    let lastEmittedTextLength = 0;
+
+    const emitProgressiveTail = async (
+      fullText: string,
+      segmentId: number
+    ): Promise<void> => {
+      if (
+        fullText.length < STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS ||
+        STREAMING_SYNTHETIC_STEP_CHARS <= 0
+      ) {
+        return;
+      }
+
+      const start = Math.max(
+        lastEmittedTextLength + STREAMING_SYNTHETIC_STEP_CHARS,
+        STREAMING_SYNTHETIC_STEP_CHARS
+      );
+
+      for (
+        let end = start;
+        end < fullText.length;
+        end += STREAMING_SYNTHETIC_STEP_CHARS
+      ) {
+        await statusCallback("text", fullText.slice(0, end), segmentId);
+        textCallbackCount++;
+        lastEmittedTextLength = end;
+
+        if (STREAMING_SYNTHETIC_STEP_DELAY_MS > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, STREAMING_SYNTHETIC_STEP_DELAY_MS)
+          );
+        }
+      }
+    };
+
+    try {
+      const codex = getCodexClient();
+      const codexAdditionalDirectories = Array.from(
+        new Set([WORKING_DIR, ...ALLOWED_PATHS])
+      );
+      console.log(
+        `Codex runtime: model=${this.codexModel}, effort=${this.codexEffort}, sandbox=${CODEX_SANDBOX_MODE}, approval=${CODEX_APPROVAL_POLICY}, network=${CODEX_NETWORK_ACCESS_ENABLED}, web_search=${CODEX_WEB_SEARCH_MODE}`
+      );
+      let thread: {
+        id: string | null;
+        runStreamed: (prompt: string) => Promise<{
+          events: AsyncIterable<{
+            type: string;
+            message?: string;
+            item?: {
+              type?: string;
+              text?: string;
+              command?: string;
+            };
+            error?: { message?: string };
+          }>;
+        }>;
+      };
+
+      if (this.sessionId && !isNewSession) {
+        try {
+          thread = codex.resumeThread(this.sessionId, {
+            model: this.codexModel,
+            modelReasoningEffort: this.codexEffort,
+            sandboxMode: CODEX_SANDBOX_MODE,
+            approvalPolicy: CODEX_APPROVAL_POLICY,
+            networkAccessEnabled: CODEX_NETWORK_ACCESS_ENABLED,
+            webSearchMode: CODEX_WEB_SEARCH_MODE,
+            additionalDirectories: codexAdditionalDirectories,
+            workingDirectory: WORKING_DIR,
+            skipGitRepoCheck: true,
+          });
+        } catch (error) {
+          console.warn(
+            `Failed to resume Codex thread ${this.sessionId}, starting a new one: ${error}`
+          );
+          this.sessionId = null;
+          thread = codex.startThread({
+            model: this.codexModel,
+            modelReasoningEffort: this.codexEffort,
+            sandboxMode: CODEX_SANDBOX_MODE,
+            approvalPolicy: CODEX_APPROVAL_POLICY,
+            networkAccessEnabled: CODEX_NETWORK_ACCESS_ENABLED,
+            webSearchMode: CODEX_WEB_SEARCH_MODE,
+            additionalDirectories: codexAdditionalDirectories,
+            workingDirectory: WORKING_DIR,
+            skipGitRepoCheck: true,
+          });
+        }
+      } else {
+        thread = codex.startThread({
+          model: this.codexModel,
+          modelReasoningEffort: this.codexEffort,
+          sandboxMode: CODEX_SANDBOX_MODE,
+          approvalPolicy: CODEX_APPROVAL_POLICY,
+          networkAccessEnabled: CODEX_NETWORK_ACCESS_ENABLED,
+          webSearchMode: CODEX_WEB_SEARCH_MODE,
+          additionalDirectories: codexAdditionalDirectories,
+          workingDirectory: WORKING_DIR,
+          skipGitRepoCheck: true,
+        });
+      }
+
+      const result = await thread.runStreamed(messageToSend);
+
+      for await (const event of result.events) {
+        if (this.stopRequested) {
+          console.log("Codex turn stopped by user");
+          break;
+        }
+
+        if (event.type === "error") {
+          const errorMessage = event.message || "Unknown Codex stream error";
+          throw new Error(errorMessage);
+        }
+
+        if (event.type === "turn.failed") {
+          throw new Error(event.error?.message || "Codex turn failed");
+        }
+
+        if (event.type === "item.completed") {
+          const item = event.item;
+          if (!item) continue;
+
+          if (item.type === "reasoning" && item.text) {
+            await statusCallback("thinking", item.text);
+            continue;
+          }
+
+          if (item.type === "command_execution") {
+            const command = item.command || "";
+            const [isSafe, reason] = checkCommandSafety(command);
+            if (!isSafe) {
+              await statusCallback("tool", `BLOCKED: ${reason}`);
+              throw new Error(`Unsafe command blocked: ${reason}`);
+            }
+
+            // Segment boundary before a new tool event keeps progressive edits
+            // stable and mirrors the Claude experience.
+            if (currentSegmentText) {
+              await statusCallback(
+                "segment_end",
+                currentSegmentText,
+                currentSegmentId
+              );
+              currentSegmentId++;
+              currentSegmentText = "";
+            }
+
+            const toolDisplay = formatToolStatus("Bash", { command });
+            this.currentTool = toolDisplay;
+            this.lastTool = toolDisplay;
+            await statusCallback("tool", toolDisplay);
+            continue;
+          }
+
+          if (item.type === "agent_message" && item.text) {
+            responseParts.push(item.text);
+            currentSegmentText += item.text;
+
+            if (
+              textCallbackCount === 0 &&
+              currentSegmentText.length >=
+                STREAMING_SYNTHETIC_FALLBACK_MIN_CHARS
+            ) {
+              const firstPreviewLen = Math.max(
+                1,
+                Math.min(
+                  STREAMING_SYNTHETIC_STEP_CHARS,
+                  currentSegmentText.length - 1
+                )
+              );
+              await statusCallback(
+                "text",
+                currentSegmentText.slice(0, firstPreviewLen),
+                currentSegmentId
+              );
+              textCallbackCount++;
+              lastEmittedTextLength = firstPreviewLen;
+              lastTextUpdate = Date.now();
+              continue;
+            }
+
+            const now = Date.now();
+            const shouldEmitText =
+              textCallbackCount === 0 ||
+              now - lastTextUpdate >= STREAMING_THROTTLE_MS;
+
+            if (shouldEmitText) {
+              await statusCallback(
+                "text",
+                currentSegmentText,
+                currentSegmentId
+              );
+              textCallbackCount++;
+              lastTextUpdate = now;
+              lastEmittedTextLength = currentSegmentText.length;
+            }
+          }
+        }
+
+        if (event.type === "turn.completed") {
+          if (thread.id) {
+            this.sessionId = thread.id;
+            this.saveSession();
+          }
+          break;
+        }
+      }
+    } catch (error) {
+      const errorStr = String(error).toLowerCase();
+      const isCleanupError =
+        errorStr.includes("cancel") || errorStr.includes("abort");
+
+      if (isCleanupError && this.stopRequested) {
+        console.warn(`Suppressed post-stop Codex error: ${error}`);
+      } else {
+        console.error(`Error in Codex query: ${error}`);
+        this.lastError = String(error).slice(0, 100);
+        this.lastErrorTime = new Date();
+        throw error;
+      }
+    } finally {
+      this.isQueryRunning = false;
+      this.abortController = null;
+      this.queryStarted = null;
+      this.currentTool = null;
+    }
+
+    this.lastActivity = new Date();
+    this.lastError = null;
+    this.lastErrorTime = null;
+
+    if (currentSegmentText) {
+      await emitProgressiveTail(currentSegmentText, currentSegmentId);
+      await statusCallback("segment_end", currentSegmentText, currentSegmentId);
+    }
+
+    await statusCallback("done", "");
+    return responseParts.join("") || "No response from Codex.";
   }
 
   /**
@@ -493,6 +1163,10 @@ class ClaudeSession {
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
         title: this.conversationTitle || "Sessione senza titolo",
+        assistant: this.assistantMode,
+        model: this.model,
+        codex_reasoning_effort:
+          this.assistantMode === "codex" ? this.codexEffort : undefined,
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -521,17 +1195,29 @@ class ClaudeSession {
    * Load session history from disk.
    */
   private loadSessionHistory(): SessionHistory {
-    try {
-      const file = Bun.file(SESSION_FILE);
-      if (!file.size) {
-        return { sessions: [] };
-      }
+    const sessionFiles = Array.from(
+      new Set([SESSION_FILE, ...LEGACY_SESSION_FILES])
+    );
 
-      const text = readFileSync(SESSION_FILE, "utf-8");
-      return JSON.parse(text) as SessionHistory;
-    } catch {
-      return { sessions: [] };
+    for (const sessionFile of sessionFiles) {
+      try {
+        const file = Bun.file(sessionFile);
+        if (!file.size) {
+          continue;
+        }
+
+        if (sessionFile !== SESSION_FILE) {
+          console.log(`Loading legacy session history from ${sessionFile}`);
+        }
+
+        const text = readFileSync(sessionFile, "utf-8");
+        return JSON.parse(text) as SessionHistory;
+      } catch {
+        // Try next candidate file path.
+      }
     }
+
+    return { sessions: [] };
   }
 
   /**
@@ -566,6 +1252,19 @@ class ClaudeSession {
     this.sessionId = sessionData.session_id;
     this.conversationTitle = sessionData.title;
     this.lastActivity = new Date();
+    if (sessionData.assistant) {
+      this.assistantMode = sessionData.assistant;
+    }
+    if (sessionData.model) {
+      if (this.assistantMode === "codex") {
+        this.codexModel = sessionData.model;
+        if (sessionData.codex_reasoning_effort) {
+          this.codexEffort = sessionData.codex_reasoning_effort;
+        }
+      } else {
+        this.claudeModel = sessionData.model;
+      }
+    }
 
     console.log(
       `Resumed session ${sessionData.session_id.slice(0, 8)}... - "${sessionData.title}"`

@@ -12,6 +12,7 @@ import { convertMarkdownToHtml, escapeHtml } from "../formatting";
 import {
   TELEGRAM_MESSAGE_LIMIT,
   TELEGRAM_SAFE_LIMIT,
+  STREAMING_DEBUG,
   STREAMING_THROTTLE_MS,
   BUTTON_LABEL_MAX_LENGTH,
 } from "../config";
@@ -83,10 +84,11 @@ export async function checkPendingAskUserRequests(
  * Tracks state for streaming message updates.
  */
 export class StreamingState {
-  textMessages = new Map<number, Message>(); // segment_id -> telegram message
+  previewMessage: Message | null = null; // single editable streaming message
   toolMessages: Message[] = []; // ephemeral tool status messages
-  lastEditTimes = new Map<number, number>(); // segment_id -> last edit time
-  lastContent = new Map<number, string>(); // segment_id -> last sent content
+  segmentText = new Map<number, string>(); // segment_id -> latest text for that segment
+  lastEditTime = 0; // last preview edit timestamp
+  lastContent = ""; // last sent preview content
 }
 
 /**
@@ -141,6 +143,133 @@ export function createStatusCallback(
   ctx: Context,
   state: StreamingState
 ): StatusCallback {
+  const getCombinedText = (): string => {
+    const ordered = [...state.segmentText.entries()].sort((a, b) => a[0] - b[0]);
+    return ordered
+      .map(([, text]) => text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+  };
+
+  const upsertPreview = async (text: string, force: boolean): Promise<void> => {
+    if (!text) return;
+
+    const now = Date.now();
+    if (!force && now - state.lastEditTime <= STREAMING_THROTTLE_MS) {
+      if (STREAMING_DEBUG) {
+        console.log(
+          `[stream-debug] preview throttle skip age=${now - state.lastEditTime}ms`
+        );
+      }
+      return;
+    }
+
+    const display =
+      text.length > TELEGRAM_SAFE_LIMIT
+        ? text.slice(0, TELEGRAM_SAFE_LIMIT) + "..."
+        : text;
+    const formatted = convertMarkdownToHtml(display);
+    if (formatted === state.lastContent) return;
+
+    if (!state.previewMessage) {
+      try {
+        state.previewMessage = await ctx.reply(formatted, { parse_mode: "HTML" });
+      } catch (htmlError) {
+        console.debug("HTML preview create failed, using plain text:", htmlError);
+        state.previewMessage = await ctx.reply(formatted);
+      }
+      state.lastContent = formatted;
+      state.lastEditTime = now;
+      if (STREAMING_DEBUG) {
+        console.log(
+          `[stream-debug] preview created msg=${state.previewMessage.message_id} len=${text.length} force=${force}`
+        );
+      }
+      return;
+    }
+
+    try {
+      await ctx.api.editMessageText(
+        state.previewMessage.chat.id,
+        state.previewMessage.message_id,
+        formatted,
+        { parse_mode: "HTML" }
+      );
+      state.lastContent = formatted;
+    } catch (htmlError) {
+      console.debug("HTML preview edit failed, trying plain text:", htmlError);
+      try {
+        await ctx.api.editMessageText(
+          state.previewMessage.chat.id,
+          state.previewMessage.message_id,
+          formatted
+        );
+        state.lastContent = formatted;
+      } catch (editError) {
+        console.debug("Preview edit failed:", editError);
+      }
+    }
+    state.lastEditTime = now;
+    if (STREAMING_DEBUG) {
+      console.log(
+        `[stream-debug] preview edited msg=${state.previewMessage.message_id} len=${text.length} force=${force}`
+      );
+    }
+  };
+
+  const finalizePreview = async (): Promise<void> => {
+    if (!state.previewMessage) return;
+
+    const finalText = getCombinedText();
+    if (!finalText) return;
+
+    const formatted = convertMarkdownToHtml(finalText);
+    if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
+      if (formatted === state.lastContent) return;
+      try {
+        await ctx.api.editMessageText(
+          state.previewMessage.chat.id,
+          state.previewMessage.message_id,
+          formatted,
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        console.debug("Failed to finalize preview with HTML:", error);
+      }
+      if (STREAMING_DEBUG) {
+        console.log(
+          `[stream-debug] preview finalized in-place msg=${state.previewMessage.message_id} len=${finalText.length}`
+        );
+      }
+      return;
+    }
+
+    try {
+      await ctx.api.deleteMessage(
+        state.previewMessage.chat.id,
+        state.previewMessage.message_id
+      );
+    } catch (error) {
+      console.debug("Failed to delete long preview before chunking:", error);
+    }
+
+    for (let i = 0; i < formatted.length; i += TELEGRAM_SAFE_LIMIT) {
+      const chunk = formatted.slice(i, i + TELEGRAM_SAFE_LIMIT);
+      try {
+        await ctx.reply(chunk, { parse_mode: "HTML" });
+      } catch (htmlError) {
+        console.debug("HTML final chunk failed, using plain text:", htmlError);
+        await ctx.reply(chunk);
+      }
+    }
+    if (STREAMING_DEBUG) {
+      console.log(
+        `[stream-debug] preview finalized by chunk-split len=${finalText.length}`
+      );
+    }
+    state.previewMessage = null;
+  };
+
   return async (statusType: string, content: string, segmentId?: number) => {
     try {
       if (statusType === "thinking") {
@@ -156,111 +285,15 @@ export function createStatusCallback(
         const toolMsg = await ctx.reply(content, { parse_mode: "HTML" });
         state.toolMessages.push(toolMsg);
       } else if (statusType === "text" && segmentId !== undefined) {
-        const now = Date.now();
-        const lastEdit = state.lastEditTimes.get(segmentId) || 0;
-
-        if (!state.textMessages.has(segmentId)) {
-          // New segment - create message
-          const formatted = formatWithinLimit(content);
-          try {
-            const msg = await ctx.reply(formatted, { parse_mode: "HTML" });
-            state.textMessages.set(segmentId, msg);
-            state.lastContent.set(segmentId, formatted);
-          } catch (htmlError) {
-            // HTML parse failed, fall back to plain text
-            console.debug("HTML reply failed, using plain text:", htmlError);
-            const msg = await ctx.reply(formatted);
-            state.textMessages.set(segmentId, msg);
-            state.lastContent.set(segmentId, formatted);
-          }
-          state.lastEditTimes.set(segmentId, now);
-        } else if (now - lastEdit > STREAMING_THROTTLE_MS) {
-          // Update existing segment message (throttled)
-          const msg = state.textMessages.get(segmentId)!;
-          const formatted = formatWithinLimit(content);
-          // Skip if content unchanged
-          if (formatted === state.lastContent.get(segmentId)) {
-            return;
-          }
-          try {
-            await ctx.api.editMessageText(
-              msg.chat.id,
-              msg.message_id,
-              formatted,
-              {
-                parse_mode: "HTML",
-              }
-            );
-            state.lastContent.set(segmentId, formatted);
-          } catch (error) {
-            const errorStr = String(error);
-            if (errorStr.includes("MESSAGE_TOO_LONG")) {
-              // Skip this intermediate update - segment_end will chunk properly
-              console.debug(
-                "Streaming edit too long, deferring to segment_end"
-              );
-            } else {
-              console.debug("HTML edit failed, trying plain text:", error);
-              try {
-                await ctx.api.editMessageText(
-                  msg.chat.id,
-                  msg.message_id,
-                  formatted
-                );
-                state.lastContent.set(segmentId, formatted);
-              } catch (editError) {
-                console.debug("Edit message failed:", editError);
-              }
-            }
-          }
-          state.lastEditTimes.set(segmentId, now);
-        }
+        state.segmentText.set(segmentId, content);
+        await upsertPreview(getCombinedText(), false);
       } else if (statusType === "segment_end" && segmentId !== undefined) {
-        if (state.textMessages.has(segmentId) && content) {
-          const msg = state.textMessages.get(segmentId)!;
-          const formatted = convertMarkdownToHtml(content);
-
-          // Skip if content unchanged
-          if (formatted === state.lastContent.get(segmentId)) {
-            return;
-          }
-
-          if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
-            try {
-              await ctx.api.editMessageText(
-                msg.chat.id,
-                msg.message_id,
-                formatted,
-                {
-                  parse_mode: "HTML",
-                }
-              );
-            } catch (error) {
-              const errorStr = String(error);
-              if (errorStr.includes("MESSAGE_TOO_LONG")) {
-                // HTML overhead pushed it over - delete and chunk
-                try {
-                  await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-                } catch (delError) {
-                  console.debug("Failed to delete for chunking:", delError);
-                }
-                await sendChunkedMessages(ctx, formatted);
-              } else {
-                console.debug("Failed to edit final message:", error);
-              }
-            }
-          } else {
-            // Too long - delete and split
-            try {
-              await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-            } catch (error) {
-              console.debug("Failed to delete message for splitting:", error);
-            }
-            await sendChunkedMessages(ctx, formatted);
-          }
-        }
+        if (content) state.segmentText.set(segmentId, content);
+        await upsertPreview(getCombinedText(), true);
       } else if (statusType === "done") {
-        // Delete tool messages - text messages stay
+        await finalizePreview();
+
+        // Delete transient tool status messages after completion.
         for (const toolMsg of state.toolMessages) {
           try {
             await ctx.api.deleteMessage(toolMsg.chat.id, toolMsg.message_id);

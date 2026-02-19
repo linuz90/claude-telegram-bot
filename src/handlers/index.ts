@@ -1,5 +1,5 @@
 /**
- * Handler exports for Claude Telegram Bot.
+ * Handler exports for AI Telegram Bot.
  */
 
 export {
@@ -7,6 +7,9 @@ export {
   handleNew,
   handleStop,
   handleStatus,
+  handlePolicy,
+  handleModel,
+  handleAssistant,
   handleResume,
   handleRestart,
   handleRetry,

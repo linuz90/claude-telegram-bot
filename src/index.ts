@@ -1,18 +1,27 @@
 /**
- * Claude Telegram Bot - TypeScript/Bun Edition
+ * AI Telegram Bot - TypeScript/Bun Edition
  *
- * Control Claude Code from your phone via Telegram.
+ * Control Claude Code or Codex from your phone via Telegram.
  */
 
 import { Bot } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
-import { TELEGRAM_TOKEN, WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "./config";
+import {
+  AI_ASSISTANT,
+  TELEGRAM_TOKEN,
+  WORKING_DIR,
+  ALLOWED_USERS,
+  RESTART_FILE,
+} from "./config";
 import { unlinkSync, readFileSync, existsSync } from "fs";
 import {
   handleStart,
   handleNew,
   handleStop,
   handleStatus,
+  handlePolicy,
+  handleModel,
+  handleAssistant,
   handleResume,
   handleRestart,
   handleRetry,
@@ -55,6 +64,9 @@ bot.command("start", handleStart);
 bot.command("new", handleNew);
 bot.command("stop", handleStop);
 bot.command("status", handleStatus);
+bot.command("policy", handlePolicy);
+bot.command("model", handleModel);
+bot.command("assistant", handleAssistant);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
@@ -93,8 +105,9 @@ bot.catch((err) => {
 // ============== Startup ==============
 
 console.log("=".repeat(50));
-console.log("Claude Telegram Bot - TypeScript Edition");
+console.log("AI Telegram Bot - TypeScript Edition");
 console.log("=".repeat(50));
+console.log(`Assistant: ${AI_ASSISTANT}`);
 console.log(`Working directory: ${WORKING_DIR}`);
 console.log(`Allowed users: ${ALLOWED_USERS.length}`);
 console.log("Starting bot...");
