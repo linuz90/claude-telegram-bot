@@ -27,6 +27,7 @@ To achieve this, I set up a folder with a CLAUDE.md that teaches Claude about me
 - 📄 **Documents**: PDFs, text files, and archives (ZIP, TAR) are extracted and analyzed
 - 🎵 **Audio**: Audio files (mp3, m4a, ogg, wav, etc.) are transcribed via OpenAI and processed
 - 🎬 **Video**: Video messages and video notes are processed by Claude
+- 📸 **Screenshots**: Ask Claude to take screenshots and send them to you
 - 🔄 **Session persistence**: Conversations continue across messages
 - 📨 **Message queuing**: Send multiple messages while Claude works - they queue up automatically. Prefix with `!` or use `/stop` to interrupt and send immediately
 - 🧠 **Extended thinking**: Trigger Claude's reasoning by using words like "think" or "reason" - you'll see its thought process as it works (configurable via `THINKING_TRIGGER_KEYWORDS`)
@@ -123,11 +124,15 @@ ALLOWED_PATHS=/your/project,/other/path,~/.claude
 Copy and edit the MCP config:
 
 ```bash
-cp mcp-config.ts mcp-config.local.ts
-# Edit mcp-config.local.ts with your MCP servers
+cp mcp-config.example.ts mcp-config.ts
+# Edit mcp-config.ts with your MCP servers
 ```
 
-The bot includes a built-in `ask_user` MCP server that lets Claude present options as tappable inline keyboard buttons. Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools.
+The bot includes two built-in MCP servers:
+- **ask_user**: Present options as tappable inline keyboard buttons
+- **screenshot**: Take screenshots and send them to Telegram (macOS only)
+
+Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools. See [docs/screenshot-feature.md](docs/screenshot-feature.md) for screenshot setup details.
 
 ## Bot Commands
 

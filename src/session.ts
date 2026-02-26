@@ -25,6 +25,7 @@ import {
 } from "./config";
 import { formatToolStatus } from "./formatting";
 import { checkPendingAskUserRequests } from "./handlers/streaming";
+import { checkPendingScreenshots } from "./handlers/screenshot";
 import { checkCommandSafety, isPathAllowed } from "./security";
 import type {
   SavedSession,
@@ -368,6 +369,26 @@ class ClaudeSession {
                   );
                   if (buttonsSent) {
                     askUserTriggered = true;
+                    break;
+                  }
+                  if (attempt < 2) {
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                  }
+                }
+              }
+
+              // Check for pending screenshots after screenshot MCP tool
+              if (toolName.startsWith("mcp__screenshot") && ctx && chatId) {
+                // Small delay to let MCP server write the file
+                await new Promise((resolve) => setTimeout(resolve, 200));
+
+                // Retry a few times in case of timing issues
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  const screenshotSent = await checkPendingScreenshots(
+                    ctx,
+                    chatId
+                  );
+                  if (screenshotSent) {
                     break;
                   }
                   if (attempt < 2) {
