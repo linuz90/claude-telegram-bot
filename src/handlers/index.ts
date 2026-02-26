@@ -18,4 +18,5 @@ export { handleDocument } from "./document";
 export { handleAudio } from "./audio";
 export { handleVideo } from "./video";
 export { handleCallback } from "./callback";
+export { checkPendingScreenshots } from "./screenshot";
 export { StreamingState, createStatusCallback } from "./streaming";

@@ -20,11 +20,17 @@ export const MCP_SERVERS: Record<
   | { type: "http"; url: string; headers?: Record<string, string> }
 > = {
   // Ask User - present options as Telegram inline keyboard buttons
-  // Uncomment to enable interactive button prompts
-  // "ask-user": {
-  //   command: "bun",
-  //   args: ["run", `${REPO_ROOT}/ask_user_mcp/server.ts`]
-  // },
+  "ask-user": {
+    command: "bun",
+    args: ["run", `${REPO_ROOT}/ask_user_mcp/server.ts`],
+  },
+
+  // Screenshot - take screenshots and send them to Telegram (macOS only)
+  // Requires screen recording permissions in System Settings
+  screenshot: {
+    command: "bun",
+    args: ["run", `${REPO_ROOT}/screenshot_mcp/server.ts`],
+  },
 
   // Example: Typefully - draft and schedule social posts
   // Docs: https://support.typefully.com/en/articles/13128440-typefully-mcp-server

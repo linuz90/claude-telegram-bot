@@ -181,6 +181,8 @@ export function formatToolStatus(
     WebFetch: "🌐",
     Task: "🎯",
     TodoWrite: "📋",
+    "mcp__screenshot": "📸",
+    "mcp__ask-user": "❓",
     mcp__: "🔧",
   };
 
@@ -256,6 +258,14 @@ export function formatToolStatus(
   if (toolName === "WebFetch") {
     const url = String(toolInput.url || "");
     return `${emoji} Fetching ${code(truncate(url, 50))}`;
+  }
+
+  if (toolName.includes("screenshot")) {
+    const windowMode = toolInput.window ? " (window)" : "";
+    const desc = toolInput.description
+      ? `: ${truncate(String(toolInput.description), 40)}`
+      : "";
+    return `${emoji} Taking screenshot${windowMode}${desc}`;
   }
 
   if (toolName === "Task") {
