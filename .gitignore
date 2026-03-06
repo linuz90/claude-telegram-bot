@@ -39,3 +39,6 @@ mcp-config.ts
 # Finder (MacOS) folder config
 .DS_Store
 /claude-bot-standalone
+
+# Local assistant runtime workspace (personal notes/state)
+workspace/
