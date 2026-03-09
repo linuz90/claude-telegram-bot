@@ -4,7 +4,7 @@
  * Rate limiting, path validation, command safety.
  */
 
-import { resolve, normalize } from "path";
+import { resolve, normalize, isAbsolute } from "path";
 import { realpathSync } from "fs";
 import type { RateLimitBucket } from "./types";
 import {
@@ -14,6 +14,7 @@ import {
   RATE_LIMIT_REQUESTS,
   RATE_LIMIT_WINDOW,
   TEMP_PATHS,
+  WORKING_DIR,
 } from "./config";
 
 // ============== Rate Limiter ==============
@@ -77,18 +78,41 @@ export const rateLimiter = new RateLimiter();
 
 // ============== Path Validation ==============
 
+function stripWrappingQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function expandUserPath(rawPath: string): string {
+  const home = process.env.HOME || "";
+  const dequoted = stripWrappingQuotes(rawPath.trim());
+  return dequoted
+    .replace(/^~(?=\/|$)/, home)
+    .replace(/^\$HOME(?=\/|$)/, home);
+}
+
 export function isPathAllowed(path: string): boolean {
   try {
-    // Expand ~ and resolve to absolute path
-    const expanded = path.replace(/^~/, process.env.HOME || "");
-    const normalized = normalize(expanded);
+    // Expand ~/$HOME and resolve to absolute path.
+    const expanded = expandUserPath(path);
+    const normalizedPath = normalize(expanded);
 
     // Try to resolve symlinks (may fail if path doesn't exist yet)
     let resolved: string;
     try {
-      resolved = realpathSync(normalized);
+      const candidate = isAbsolute(normalizedPath)
+        ? normalizedPath
+        : resolve(WORKING_DIR, normalizedPath);
+      resolved = realpathSync(candidate);
     } catch {
-      resolved = resolve(normalized);
+      resolved = isAbsolute(normalizedPath)
+        ? resolve(normalizedPath)
+        : resolve(WORKING_DIR, normalizedPath);
     }
 
     // Always allow temp paths (for bot's own files)
@@ -129,20 +153,28 @@ export function checkCommandSafety(
     }
   }
 
-  // Special handling for rm commands - validate paths
-  if (lowerCommand.includes("rm ")) {
+  // Special handling for rm commands - validate paths.
+  // We parse each shell segment to avoid false positives with operators.
+  if (/\brm\b/i.test(command)) {
     try {
-      // Simple parsing: extract arguments after rm
-      const rmMatch = command.match(/rm\s+(.+)/i);
-      if (rmMatch) {
-        const args = rmMatch[1]!.split(/\s+/);
-        for (const arg of args) {
-          // Skip flags
-          if (arg.startsWith("-") || arg.length <= 1) continue;
+      const segments = command.split(/&&|\|\||;|\|/);
+      for (const segment of segments) {
+        const tokens = segment.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+        const rmIndex = tokens.findIndex((token) =>
+          /^(?:\S*\/)?rm$/i.test(stripWrappingQuotes(token))
+        );
 
-          // Check if path is allowed
+        if (rmIndex === -1) continue;
+
+        for (let i = rmIndex + 1; i < tokens.length; i++) {
+          const rawArg = tokens[i]!;
+          const arg = stripWrappingQuotes(rawArg);
+
+          // Skip flags and separators
+          if (!arg || arg.startsWith("-") || arg === "--") continue;
+
           if (!isPathAllowed(arg)) {
-            return [false, `rm target outside allowed paths: ${arg}`];
+            return [false, `rm target outside allowed paths: ${rawArg}`];
           }
         }
       }

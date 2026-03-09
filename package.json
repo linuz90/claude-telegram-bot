@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.ts",
+    "start:codex": "AI_ASSISTANT=codex bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
+    "dev:codex": "AI_ASSISTANT=codex bun --watch run src/index.ts",
     "typecheck": "bun run --bun tsc --noEmit"
   },
   "devDependencies": {
@@ -18,6 +20,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.1.76",
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@openai/codex-sdk": "^0.101.0",
     "grammy": "^1.38.4",
     "openai": "^6.15.0",
     "zod": "^4.2.1"
