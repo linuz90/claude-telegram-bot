@@ -67,7 +67,7 @@ export const AI_ASSISTANT: "claude" | "codex" =
 export const CLAUDE_MODEL =
   process.env.CLAUDE_MODEL || "claude-opus-4-6";
 export type ClaudeReasoningEffort = "low" | "medium" | "high";
-const claudeEffortRaw = (process.env.CLAUDE_REASONING_EFFORT || "high")
+const claudeEffortRaw = (process.env.CLAUDE_REASONING_EFFORT || "low")
   .toLowerCase()
   .trim();
 export const CLAUDE_REASONING_EFFORT: ClaudeReasoningEffort =
@@ -75,7 +75,7 @@ export const CLAUDE_REASONING_EFFORT: ClaudeReasoningEffort =
   claudeEffortRaw === "medium" ||
   claudeEffortRaw === "high"
     ? claudeEffortRaw
-    : "high";
+    : "low";
 export const CODEX_MODEL = process.env.CODEX_MODEL || "gpt-5.3-codex";
 export type CodexReasoningEffort =
   | "minimal"

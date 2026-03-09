@@ -45,7 +45,7 @@ curl -fsSL https://bun.sh/install | bash
 source ~/.bash_profile 2>/dev/null || source ~/.profile 2>/dev/null || true
 
 # 3) Clone and install dependencies
-git clone https://github.com/artemgetmann/claude-telegram-bot.git ~/.claude-telegram-bot
+git clone https://github.com/linuz90/claude-telegram-bot.git ~/.claude-telegram-bot
 cd ~/.claude-telegram-bot
 ~/.bun/bin/bun install
 
@@ -189,7 +189,7 @@ TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
 AI_WORKING_DIR=/path/to/this/repo/workspace  # Where the assistant runs (loads CLAUDE.md, skills, MCP)
 AI_ASSISTANT=claude                        # or codex
 CLAUDE_MODEL=claude-opus-4-6
-CLAUDE_REASONING_EFFORT=high              # low | medium | high
+CLAUDE_REASONING_EFFORT=low               # low | medium | high (set medium/high for baseline always-on reasoning)
 CODEX_MODEL=gpt-5.3-codex
 CODEX_REASONING_EFFORT=medium             # minimal | low | medium | high | xhigh
 CODEX_SANDBOX_MODE=workspace-write        # read-only | workspace-write | danger-full-access
