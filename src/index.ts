@@ -99,9 +99,18 @@ console.log(`Working directory: ${WORKING_DIR}`);
 console.log(`Allowed users: ${ALLOWED_USERS.length}`);
 console.log("Starting bot...");
 
-// Get bot info first
+// Get bot info and register command menu
 const botInfo = await bot.api.getMe();
 console.log(`Bot started: @${botInfo.username}`);
+
+await bot.api.setMyCommands([
+  { command: "new", description: "Start a new conversation" },
+  { command: "stop", description: "Stop current processing" },
+  { command: "status", description: "Show session status" },
+  { command: "resume", description: "Resume previous conversation" },
+  { command: "restart", description: "Restart the bot" },
+  { command: "retry", description: "Retry last failed message" },
+]);
 
 // Check for pending restart message to update
 if (existsSync(RESTART_FILE)) {
