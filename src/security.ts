@@ -136,7 +136,9 @@ export function checkCommandSafety(
       const rmMatch = command.match(/rm\s+(.+)/i);
       if (rmMatch) {
         const args = rmMatch[1]!.split(/\s+/);
-        for (const arg of args) {
+        for (const rawArg of args) {
+          // Strip surrounding quotes
+          const arg = rawArg.replace(/^['"]|['"]$/g, "");
           // Skip flags
           if (arg.startsWith("-") || arg.length <= 1) continue;
 
