@@ -213,6 +213,7 @@ class ClaudeSession {
     console.log(`MODEL: using ${modelToUse}`);
     const options: Options = {
       model: modelToUse,
+      extraArgs: { model: modelToUse },
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
