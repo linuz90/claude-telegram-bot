@@ -30,8 +30,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Non-root user matching K8s securityContext
-RUN adduser -D -u 1000 akhozya
+# oven/bun:alpine already has UID 1000 as 'bun' user.
+# Create akhozya as alias + home dir for K8s securityContext (runAsUser: 1000)
+RUN deluser bun && adduser -D -u 1000 -h /home/akhozya akhozya
 USER akhozya
 
 CMD ["bun", "run", "src/index.ts"]
