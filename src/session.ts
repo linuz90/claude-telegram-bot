@@ -209,8 +209,10 @@ class ClaudeSession {
     }
 
     // Build SDK V1 options - supports all features
+    const modelToUse = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
+    console.log(`MODEL: using ${modelToUse}`);
     const options: Options = {
-      model: process.env.CLAUDE_MODEL || "claude-sonnet-4-5",
+      model: modelToUse,
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
