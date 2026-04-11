@@ -274,6 +274,13 @@ class ClaudeSession {
         },
       });
 
+      // Set model after query creation (SDK query() ignores model in options)
+      if (modelToUse) {
+        await queryInstance.setModel(modelToUse).catch((e: unknown) =>
+          console.warn(`setModel failed: ${e}`)
+        );
+      }
+
       // Process streaming response
       for await (const event of queryInstance) {
         // Check for abort
