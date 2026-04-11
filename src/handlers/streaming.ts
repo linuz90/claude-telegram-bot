@@ -283,7 +283,22 @@ export function createStatusCallback(
           state.lastEditTimes.set(segmentId, now);
         }
       } else if (statusType === "segment_end" && segmentId !== undefined) {
-        if (state.textMessages.has(segmentId) && content) {
+        if (!content) return;
+
+        // Short responses may skip the "text" event (throttle threshold),
+        // so no message exists yet — create one directly
+        if (!state.textMessages.has(segmentId)) {
+          const formatted = convertMarkdownToHtml(content);
+          try {
+            const msg = await ctx.reply(formatted, { parse_mode: "HTML" });
+            state.textMessages.set(segmentId, msg);
+          } catch {
+            try { await ctx.reply(content); } catch { /* give up */ }
+          }
+          return;
+        }
+
+        if (state.textMessages.has(segmentId)) {
           const msg = state.textMessages.get(segmentId)!;
           const formatted = convertMarkdownToHtml(content);
 
