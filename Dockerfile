@@ -1,9 +1,15 @@
 FROM oven/bun:1.2-alpine AS deps
 WORKDIR /app
+# BUILD_TS busts cache on bi-weekly scheduled rebuilds so caret ranges in
+# package.json resolve to the latest published version (SDK, grammy, etc).
+ARG BUILD_TS=local
+RUN echo "build: $BUILD_TS"
 COPY package.json bun.lock* ./
 RUN bun install
 
 FROM oven/bun:1.2-alpine
+
+ARG BUILD_TS=local
 
 # System dependencies
 RUN apk add --no-cache git openssh-client curl jq ca-certificates bash
@@ -18,13 +24,15 @@ RUN curl -fsSL https://fluxcd.io/install.sh | bash
 # gh CLI
 RUN apk add --no-cache github-cli
 
-# Claude Code CLI (Agent SDK spawns this as subprocess)
-# Install to user-writable prefix so init container can update on restart
+# Claude Code CLI (Agent SDK spawns this as subprocess).
+# CLI prefix on PVC (chezmoi-init keeps `npm update -g` working at runtime).
+# BUILD_TS busts this layer on scheduled rebuilds → fresh @latest install.
 ENV NPM_CONFIG_PREFIX=/home/akhozya/.npm-global
 ENV PATH="/home/akhozya/.npm-global/bin:$PATH"
 RUN apk add --no-cache nodejs npm && \
     mkdir -p /home/akhozya/.npm-global && \
-    npm install -g @anthropic-ai/claude-code && \
+    echo "build: $BUILD_TS" && \
+    npm install -g @anthropic-ai/claude-code@latest && \
     npm cache clean --force
 
 # chezmoi (dotfile sync in init container uses same image)
