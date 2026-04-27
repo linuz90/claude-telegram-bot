@@ -23,6 +23,7 @@ import {
   handleAudio,
   handleVideo,
   handleCallback,
+  startTriggerServer,
 } from "./handlers";
 
 // Create bot instance
@@ -127,12 +128,16 @@ if (existsSync(RESTART_FILE)) {
 // Start with concurrent runner (commands work immediately)
 const runner = run(bot);
 
+// Optional HTTP trigger (no-op when TRIGGER_SECRET unset)
+const triggerServer = startTriggerServer(bot);
+
 // Graceful shutdown
 const stopRunner = () => {
   if (runner.isRunning()) {
     console.log("Stopping bot...");
     runner.stop();
   }
+  triggerServer?.stop();
 };
 
 process.on("SIGINT", () => {

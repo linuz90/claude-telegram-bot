@@ -19,3 +19,4 @@ export { handleAudio } from "./audio";
 export { handleVideo } from "./video";
 export { handleCallback } from "./callback";
 export { StreamingState, createStatusCallback } from "./streaming";
+export { startTriggerServer } from "./trigger";
