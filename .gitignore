@@ -24,18 +24,24 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # user-specific MCP config (use mcp-config.example.ts as template)
 mcp-config.ts
+llm-providers.ts
 
 # caches
 .eslintcache
 .cache
 *.tsbuildinfo
+__pycache__/
+*.pyc
 
 # IntelliJ based IDEs
 .idea
 
 # Cursor
 .cursor
+.codex
 
 # Finder (MacOS) folder config
 .DS_Store
 /claude-bot-standalone
+.runtime/
+docker-compose.override.yml

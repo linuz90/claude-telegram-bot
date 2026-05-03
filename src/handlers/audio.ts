@@ -8,14 +8,24 @@
 import type { Context } from "grammy";
 import { unlinkSync } from "fs";
 import { session } from "../session";
-import { ALLOWED_USERS, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
+import {
+  ALLOWED_USERS,
+  PRIMARY_LANGUAGE,
+  TEMP_DIR,
+  TRANSCRIPTION_PROMPT,
+  TRANSCRIPTION_AVAILABLE,
+  WHISPER_SERVICE_URL,
+} from "../config";
+import { responseLanguageInstruction, t } from "../i18n";
 import { isAuthorized, rateLimiter } from "../security";
 import {
   auditLog,
+  auditLogError,
   auditLogRateLimit,
   transcribeVoice,
   startTypingIndicator,
 } from "../utils";
+import { saveLastMessage } from "../last-message";
 import { StreamingState, createStatusCallback } from "./streaming";
 
 // Supported audio file extensions
@@ -44,6 +54,98 @@ export function isAudioFile(fileName?: string, mimeType?: string): boolean {
   return false;
 }
 
+async function transcribeWithLocalWhisper(filePath: string): Promise<string | null> {
+  const whisper = Bun.which("whisper");
+  if (!whisper) {
+    return null;
+  }
+
+  const outDir = `${TEMP_DIR}/whisper_${Date.now()}`;
+  await Bun.$`mkdir -p ${outDir}`.quiet();
+
+  try {
+    await Bun.$`${whisper} ${filePath} --language ${PRIMARY_LANGUAGE} --model base --output_format txt --output_dir ${outDir}`.quiet();
+    const baseName = (filePath.split("/").pop() || "audio").replace(/\.[^.]+$/, "");
+    const transcriptPath = `${outDir}/${baseName}.txt`;
+    if (!(await Bun.file(transcriptPath).exists())) {
+      return null;
+    }
+    const transcript = (await Bun.file(transcriptPath).text()).trim();
+    return transcript || null;
+  } catch (error) {
+    console.error("Local Whisper transcription failed:", error);
+    return null;
+  }
+}
+
+async function transcribeWithWhisperService(
+  filePath: string
+): Promise<string | null> {
+  if (!WHISPER_SERVICE_URL) {
+    return null;
+  }
+
+  try {
+    const form = new FormData();
+    form.append("file", Bun.file(filePath));
+    form.append("language", PRIMARY_LANGUAGE);
+    form.append("prompt", TRANSCRIPTION_PROMPT);
+
+    const response = await fetch(`${WHISPER_SERVICE_URL}/transcribe`, {
+      method: "POST",
+      body: form,
+    });
+
+    if (!response.ok) {
+      console.error(
+        `Whisper service failed: ${response.status} ${await response.text()}`
+      );
+      return null;
+    }
+
+    const payload = (await response.json()) as { text?: string };
+    return payload.text?.trim() || null;
+  } catch (error) {
+    console.error("Whisper service request failed:", error);
+    return null;
+  }
+}
+
+async function transcribeAudio(filePath: string): Promise<string | null> {
+  const serviceTranscript = await transcribeWithWhisperService(filePath);
+  if (serviceTranscript) {
+    return serviceTranscript;
+  }
+
+  const localTranscript = await transcribeWithLocalWhisper(filePath);
+  if (localTranscript) {
+    return localTranscript;
+  }
+
+  if (TRANSCRIPTION_AVAILABLE) {
+    return transcribeVoice(filePath);
+  }
+
+  return null;
+}
+
+function buildVoicePrompt(rawTranscript: string, caption?: string): string {
+  const captionBlock = caption ? `\n\nTelegram caption:\n${caption}` : "";
+
+  return `[Telegram voice message]
+ASR transcript:
+${rawTranscript}${captionBlock}
+
+Voice handling rules:
+- Silently correct obvious speech-to-text errors before acting (misheard words, phonetic substitutions, brand/tool names).
+- If a corrupted word changes the requested action, target, or source, ask one short clarification question instead of using tools or making assumptions.
+- Do not reinterpret unclear voice input as a different task unless the transcript clearly supports it.
+- ${responseLanguageInstruction()}
+
+User message to answer:
+${rawTranscript}`;
+}
+
 /**
  * Process an audio file: transcribe and send to Claude.
  */
@@ -55,54 +157,48 @@ export async function processAudioFile(
   username: string,
   chatId: number
 ): Promise<void> {
-  if (!TRANSCRIPTION_AVAILABLE) {
-    await ctx.reply(
-      "Voice transcription is not configured. Set OPENAI_API_KEY in .env"
-    );
-    return;
-  }
-
   const stopProcessing = session.startProcessing();
   const typing = startTypingIndicator(ctx);
 
   try {
-    // Transcribe
-    const statusMsg = await ctx.reply("🎤 Transcribing audio...");
+    const statusMsg = await ctx.reply(t.audioTranscribing);
 
-    const transcript = await transcribeVoice(filePath);
+    const transcript = await transcribeAudio(filePath);
     if (!transcript) {
+      await auditLogError(
+        userId,
+        username,
+        "Audio transcription unavailable: configure WHISPER_SERVICE_URL, install local whisper CLI, or configure OPENAI_API_KEY",
+        "AUDIO"
+      );
       await ctx.api.editMessageText(
         chatId,
         statusMsg.message_id,
-        "❌ Transcription failed."
+        t.audioFailed
       );
       return;
     }
 
-    // Show transcript
     const maxDisplay = 4000;
     const displayTranscript =
       transcript.length > maxDisplay
-        ? transcript.slice(0, maxDisplay) + "…"
+        ? transcript.slice(0, maxDisplay) + "..."
         : transcript;
     await ctx.api.editMessageText(
       chatId,
       statusMsg.message_id,
-      `🎤 "${displayTranscript}"`
+      t.audioPreview(displayTranscript)
     );
 
-    // Build prompt: transcript + optional caption
-    const prompt = caption
-      ? `${transcript}\n\n---\n\n${caption}`
-      : transcript;
+    const prompt = buildVoicePrompt(transcript, caption);
+
+    session.lastMessage = prompt;
+    saveLastMessage(prompt);
 
     // Set conversation title (if new session)
     if (!session.isActive) {
-      const title =
-        transcript.length > 50
-          ? transcript.slice(0, 47) + "..."
-          : transcript;
-      session.conversationTitle = title;
+      session.conversationTitle =
+        transcript.length > 50 ? transcript.slice(0, 47) + "..." : transcript;
     }
 
     // Create streaming state and callback
@@ -127,10 +223,10 @@ export async function processAudioFile(
     if (String(error).includes("abort") || String(error).includes("cancel")) {
       const wasInterrupt = session.consumeInterruptFlag();
       if (!wasInterrupt) {
-        await ctx.reply("🛑 Query stopped.");
+        await ctx.reply(t.queryStopped);
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply(t.error(String(error).slice(0, 200)));
     }
   } finally {
     stopProcessing();
@@ -160,7 +256,7 @@ export async function handleAudio(ctx: Context): Promise<void> {
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply(t.unauthorizedOwner);
     return;
   }
 
@@ -169,7 +265,7 @@ export async function handleAudio(ctx: Context): Promise<void> {
   if (!allowed) {
     await auditLogRateLimit(userId, username, retryAfter!);
     await ctx.reply(
-      `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      t.rateLimited(retryAfter!.toFixed(1))
     );
     return;
   }
@@ -191,7 +287,7 @@ export async function handleAudio(ctx: Context): Promise<void> {
     await Bun.write(audioPath, buffer);
   } catch (error) {
     console.error("Failed to download audio:", error);
-    await ctx.reply("❌ Failed to download audio file.");
+    await ctx.reply(t.downloadAudioFailed);
     return;
   }
 

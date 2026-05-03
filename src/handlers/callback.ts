@@ -7,6 +7,7 @@
 import type { Context } from "grammy";
 import { unlinkSync } from "fs";
 import { session } from "../session";
+import { t } from "../i18n";
 import { ALLOWED_USERS } from "../config";
 import { isAuthorized } from "../security";
 import { auditLog, startTypingIndicator } from "../utils";
@@ -142,10 +143,10 @@ export async function handleCallback(ctx: Context): Promise<void> {
       // Only show "Query stopped" if it was an explicit stop, not an interrupt from a new message
       const wasInterrupt = session.consumeInterruptFlag();
       if (!wasInterrupt) {
-        await ctx.reply("🛑 Query stopped.");
+        await ctx.reply(t.queryStopped);
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply(t.error(String(error).slice(0, 200)));
     }
   } finally {
     typing.stop();
@@ -165,13 +166,13 @@ async function handleResumeCallback(
   const sessionId = callbackData.replace("resume:", "");
 
   if (!sessionId || !userId || !chatId) {
-    await ctx.answerCallbackQuery({ text: "ID sessione non valido" });
+    await ctx.answerCallbackQuery({ text: t.invalidSessionId });
     return;
   }
 
   // Check if session is already active
   if (session.isActive) {
-    await ctx.answerCallbackQuery({ text: "Sessione già attiva" });
+    await ctx.answerCallbackQuery({ text: t.resumeActive });
     return;
   }
 
@@ -189,11 +190,10 @@ async function handleResumeCallback(
   } catch (error) {
     console.debug("Failed to edit resume message:", error);
   }
-  await ctx.answerCallbackQuery({ text: "Sessione ripresa!" });
+  await ctx.answerCallbackQuery({ text: t.resumeSuccess });
 
   // Send a hidden recap prompt to Claude
-  const recapPrompt =
-    "Please write a very concise recap of where we are in this conversation, to refresh my memory. Max 2-3 sentences.";
+  const recapPrompt = t.recapPrompt;
 
   const typing = startTypingIndicator(ctx);
   const state = new StreamingState();

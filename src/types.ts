@@ -53,6 +53,57 @@ export interface McpHttpConfig {
   headers?: Record<string, string>;
 }
 
+// LLM provider configuration
+export type LlmProviderKind = "claude-code" | "openai-chat" | "cli";
+
+export type LlmProviderConfig =
+  | ClaudeCodeProviderConfig
+  | OpenAIChatProviderConfig
+  | CliProviderConfig;
+
+export interface BaseLlmProviderConfig {
+  type: LlmProviderKind;
+  label?: string;
+  description?: string;
+  tools?: boolean;
+  toolPolicy?: Partial<ToolPolicyConfig>;
+}
+
+export interface ClaudeCodeProviderConfig extends BaseLlmProviderConfig {
+  type: "claude-code";
+}
+
+export interface OpenAIChatProviderConfig extends BaseLlmProviderConfig {
+  type: "openai-chat";
+  model: string;
+  apiKeyEnv?: string;
+  baseURL?: string;
+}
+
+export interface CliProviderConfig extends BaseLlmProviderConfig {
+  type: "cli";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  promptMode?: "stdin" | "arg-last";
+  timeoutMs?: number;
+}
+
+// Native tool policy
+export type ToolRisk = "read" | "write" | "destructive" | "interactive" | "shell" | "file" | "unknown";
+export type ToolDecision = "allow" | "confirm" | "deny";
+
+export interface ToolPolicyConfig {
+  read: ToolDecision;
+  write: ToolDecision;
+  destructive: ToolDecision;
+  interactive: ToolDecision;
+  shell: ToolDecision;
+  file: ToolDecision;
+  unknown: ToolDecision;
+}
+
 // Audit log event types
 export type AuditEventType =
   | "message"

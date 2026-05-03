@@ -1,0 +1,54 @@
+services:
+  bot:
+    build:
+      context: .
+    user: bun
+    env_file:
+      - .env
+    environment:
+      HOME: /home/bun
+      CLAUDE_WORKING_DIR: ${BOT_CONTAINER_WORKDIR:-/app}
+      ALLOWED_PATHS: ${BOT_CONTAINER_ALLOWED_PATHS:-/app,/home/bun/.claude,/home/bun/.codex,/home/bun/.gemini,/tmp/telegram-bot}
+      CLAUDE_CLI_PATH: /usr/local/bin/claude
+      MEMPALACE_MCP_URL: ${MEMPALACE_MCP_URL:-http://host.docker.internal:3100/mcp}
+      WHISPER_SERVICE_URL: ${BOT_CONTAINER_WHISPER_SERVICE_URL:-http://whisper:8000}
+      AUDIT_LOG_PATH: ${AUDIT_LOG_PATH:-/tmp/claude-telegram-audit.log}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - bot_node_modules:/app/node_modules
+      - ${HOST_CLAUDE_JSON:-./.docker/claude.json}:/home/bun/.claude.json:ro
+      - ${HOST_CLAUDE_DIR:-bot_claude}:/home/bun/.claude
+      - ${HOST_CODEX_DIR:-bot_codex}:/home/bun/.codex
+      - ${HOST_GEMINI_DIR:-bot_gemini}:/home/bun/.gemini
+    depends_on:
+      whisper:
+        condition: service_healthy
+    restart: unless-stopped
+
+  whisper:
+    build:
+      context: ./services/whisper
+    environment:
+      WHISPER_MODEL: small
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    ports:
+      - "8087:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  bot_node_modules:
+  bot_claude:
+  bot_codex:
+  bot_gemini:
+  whisper_cache:

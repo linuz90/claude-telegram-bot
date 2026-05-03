@@ -10,11 +10,14 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import OpenAI from "openai";
 import { readFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
+  CLAUDE_CLI_PATH,
   MCP_SERVERS,
+  QUERY_TIMEOUT_MS,
   SAFETY_PROMPT,
   SESSION_FILE,
   STREAMING_THROTTLE_MS,
@@ -28,8 +31,16 @@ import {
   checkPendingAskUserRequests,
   checkPendingSendFileRequests,
 } from "./handlers/streaming";
+import {
+  getActiveLlmProvider,
+  getLlmProviderConfig,
+} from "./llm-provider";
+import { nativeToolRuntime } from "./native-tool-runtime";
+import { responseLanguageInstruction, t } from "./i18n";
 import { checkCommandSafety, isPathAllowed } from "./security";
 import type {
+  CliProviderConfig,
+  OpenAIChatProviderConfig,
   SavedSession,
   SessionHistory,
   StatusCallback,
@@ -76,6 +87,39 @@ function getTextFromMessage(msg: SDKMessage): string | null {
  */
 // Maximum number of sessions to keep in history
 const MAX_SESSIONS = 5;
+const OPENAI_SYSTEM_PROMPT = `You are the Telegram bot's fallback LLM.
+${responseLanguageInstruction()}
+When tools are available, use them before answering questions about configured MCP data, saved memory, files, terminal, or recent Telegram context.
+For general explanations, planning, drafting, and Q&A, answer normally and concisely.
+Working directory context: ${WORKING_DIR}`;
+
+interface CliToolRequest {
+  tool: string;
+  arguments?: Record<string, unknown>;
+}
+
+function parseCliToolRequest(output: string): CliToolRequest | null {
+  const trimmed = output.trim();
+  const jsonText =
+    trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] ||
+    trimmed.match(/(\{[\s\S]*"tool"[\s\S]*\})/)?.[1] ||
+    trimmed;
+  try {
+    const parsed = JSON.parse(jsonText) as Partial<CliToolRequest>;
+    if (typeof parsed.tool === "string") {
+      return {
+        tool: parsed.tool,
+        arguments:
+          parsed.arguments && typeof parsed.arguments === "object"
+            ? parsed.arguments as Record<string, unknown>
+            : {},
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 class ClaudeSession {
   sessionId: string | null = null;
@@ -178,9 +222,26 @@ class ClaudeSession {
     chatId?: number,
     ctx?: Context
   ): Promise<string> {
-    // Set chat context for ask_user MCP tool
     if (chatId) {
       process.env.TELEGRAM_CHAT_ID = String(chatId);
+    }
+
+    const provider = getActiveLlmProvider();
+    const providerConfig = getLlmProviderConfig(provider);
+    if (providerConfig.type === "openai-chat") {
+      return this.sendOpenAIStreaming(
+        message,
+        statusCallback,
+        providerConfig
+      );
+    }
+    if (providerConfig.type === "cli") {
+      return this.sendCliProvider(
+        message,
+        statusCallback,
+        provider,
+        providerConfig
+      );
     }
 
     const isNewSession = !this.isActive;
@@ -222,10 +283,10 @@ class ClaudeSession {
       resume: this.sessionId || undefined,
     };
 
-    // Add Claude Code executable path if set (required for standalone builds)
-    if (process.env.CLAUDE_CODE_PATH) {
-      options.pathToClaudeCodeExecutable = process.env.CLAUDE_CODE_PATH;
-    }
+    // Use the configured Claude Code executable instead of the SDK bundled CLI.
+    // The bundled CLI can lag behind the user's installed Claude Code version.
+    options.pathToClaudeCodeExecutable =
+      process.env.CLAUDE_CODE_PATH || CLAUDE_CLI_PATH;
 
     if (this.sessionId && !isNewSession) {
       console.log(
@@ -254,6 +315,12 @@ class ClaudeSession {
     this.stopRequested = false;
     this.queryStarted = new Date();
     this.currentTool = null;
+    let timedOut = false;
+    const queryTimeout = setTimeout(() => {
+      timedOut = true;
+      console.warn(`Query timed out after ${QUERY_TIMEOUT_MS}ms`);
+      this.abortController?.abort();
+    }, QUERY_TIMEOUT_MS);
 
     // Response tracking
     const responseParts: string[] = [];
@@ -425,6 +492,17 @@ class ClaudeSession {
 
         // Result message
         if (event.type === "result") {
+          if (
+            "subtype" in event &&
+            event.subtype === "error_during_execution"
+          ) {
+            const errors = "errors" in event ? event.errors : undefined;
+            const detail = Array.isArray(errors) && errors.length > 0
+              ? String(errors[0])
+              : "Claude Code execution failed";
+            throw new Error(detail);
+          }
+
           console.log("Response complete");
           queryCompleted = true;
 
@@ -447,6 +525,12 @@ class ClaudeSession {
       const isCleanupError =
         errorStr.includes("cancel") || errorStr.includes("abort");
 
+      if (timedOut) {
+        this.lastError = "Query timed out";
+        this.lastErrorTime = new Date();
+        throw new Error("Query timed out");
+      }
+
       if (
         isCleanupError &&
         (queryCompleted || askUserTriggered || this.stopRequested)
@@ -459,6 +543,7 @@ class ClaudeSession {
         throw error;
       }
     } finally {
+      clearTimeout(queryTimeout);
       this.isQueryRunning = false;
       this.abortController = null;
       this.queryStarted = null;
@@ -482,7 +567,397 @@ class ClaudeSession {
 
     await statusCallback("done", "");
 
-    return responseParts.join("") || "No response from Claude.";
+    if (responseParts.length === 0) {
+      await statusCallback("text", "No response from Claude.", currentSegmentId);
+      await statusCallback(
+        "segment_end",
+        "No response from Claude.",
+        currentSegmentId
+      );
+      return "No response from Claude.";
+    }
+
+    return responseParts.join("");
+  }
+
+  private async sendOpenAIStreaming(
+    message: string,
+    statusCallback: StatusCallback,
+    providerConfig: OpenAIChatProviderConfig
+  ): Promise<string> {
+    const apiKeyEnv = providerConfig.apiKeyEnv || "OPENAI_API_KEY";
+    const apiKey = process.env[apiKeyEnv] || "";
+    if (!apiKey) {
+      throw new Error(
+        `${providerConfig.label || "OpenAI"} provider selected but ${apiKeyEnv} is not configured.`
+      );
+    }
+
+    const isNewSession = !this.lastActivity;
+    let messageToSend = message;
+    if (isNewSession) {
+      const now = new Date();
+      messageToSend = `[Current date/time: ${now.toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "short",
+      })}]\n\n${message}`;
+    }
+
+    console.log(
+      `STARTING OpenAI-compatible fallback (${providerConfig.model})`
+    );
+
+    if (this.stopRequested) {
+      this.stopRequested = false;
+      throw new Error("Query cancelled");
+    }
+
+    this.abortController = new AbortController();
+    this.isQueryRunning = true;
+    this.stopRequested = false;
+    this.queryStarted = new Date();
+    this.currentTool = `LLM: ${providerConfig.label || providerConfig.model}`;
+    this.lastTool = this.currentTool;
+
+    let timedOut = false;
+    const queryTimeout = setTimeout(() => {
+      timedOut = true;
+      console.warn(`OpenAI query timed out after ${QUERY_TIMEOUT_MS}ms`);
+      this.abortController?.abort();
+    }, QUERY_TIMEOUT_MS);
+
+    const responseParts: string[] = [];
+    let currentSegmentText = "";
+
+    try {
+      await statusCallback("tool", this.currentTool);
+
+      const client = new OpenAI({
+        apiKey,
+        baseURL: providerConfig.baseURL,
+      });
+
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: "system", content: OPENAI_SYSTEM_PROMPT },
+        { role: "user", content: messageToSend },
+      ];
+      const nativeTools = providerConfig.tools
+        ? await nativeToolRuntime.listTools()
+        : [];
+      const tools: OpenAI.Chat.Completions.ChatCompletionTool[] =
+        nativeTools.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.inputSchema,
+          },
+        }));
+
+      for (let step = 0; step < 6; step++) {
+        if (this.stopRequested) {
+          console.log("OpenAI query aborted by user");
+          break;
+        }
+
+        const completion = await client.chat.completions.create(
+          {
+            model: providerConfig.model,
+            messages,
+            tools: tools.length ? tools : undefined,
+            tool_choice: tools.length ? "auto" : undefined,
+          },
+          { signal: this.abortController.signal }
+        );
+
+        const usage = completion.usage;
+        if (usage) {
+          this.lastUsage = {
+            input_tokens: usage.prompt_tokens || 0,
+            output_tokens: usage.completion_tokens || 0,
+          };
+        }
+
+        const choice = completion.choices[0];
+        const assistantMessage = choice?.message;
+        if (!assistantMessage) {
+          break;
+        }
+
+        messages.push(assistantMessage);
+        const toolCalls = assistantMessage.tool_calls || [];
+        if (!toolCalls.length) {
+          const content = assistantMessage.content || "";
+          if (content) {
+            responseParts.push(content);
+            currentSegmentText += content;
+            await statusCallback("text", currentSegmentText, 0);
+          }
+          break;
+        }
+
+        for (const toolCall of toolCalls) {
+          if (toolCall.type !== "function") {
+            continue;
+          }
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments || "{}") as Record<
+              string,
+              unknown
+            >;
+          } catch {
+            args = {};
+          }
+          const result = await nativeToolRuntime.callTool(
+            toolCall.function.name,
+            args,
+            statusCallback,
+            {
+              provider: getActiveLlmProvider(),
+              override: providerConfig.toolPolicy,
+            }
+          );
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: result,
+          });
+        }
+      }
+    } catch (error) {
+      if (timedOut) {
+        this.lastError = "OpenAI query timed out";
+        this.lastErrorTime = new Date();
+        throw new Error("OpenAI query timed out");
+      }
+
+      const errorStr = String(error).toLowerCase();
+      if (errorStr.includes("abort") || errorStr.includes("cancel")) {
+        throw error;
+      }
+
+      console.error(`Error in OpenAI query: ${error}`);
+      this.lastError = String(error).slice(0, 100);
+      this.lastErrorTime = new Date();
+      throw error;
+    } finally {
+      clearTimeout(queryTimeout);
+      this.isQueryRunning = false;
+      this.abortController = null;
+      this.queryStarted = null;
+      this.currentTool = null;
+    }
+
+    this.lastActivity = new Date();
+    this.lastError = null;
+    this.lastErrorTime = null;
+
+    if (currentSegmentText) {
+      await statusCallback("segment_end", currentSegmentText, 0);
+    }
+    await statusCallback("done", "");
+
+    if (responseParts.length === 0) {
+      const fallback = "OpenAI provider returned no response.";
+      await statusCallback("text", fallback, 0);
+      await statusCallback("segment_end", fallback, 0);
+      return fallback;
+    }
+
+    console.log("OpenAI-compatible response complete");
+    return responseParts.join("");
+  }
+
+  private async sendCliProvider(
+    message: string,
+    statusCallback: StatusCallback,
+    provider: string,
+    providerConfig: CliProviderConfig
+  ): Promise<string> {
+    const timeoutMs = providerConfig.timeoutMs || QUERY_TIMEOUT_MS;
+
+    console.log(`STARTING CLI provider ${provider}: ${providerConfig.command}`);
+
+    if (this.stopRequested) {
+      this.stopRequested = false;
+      throw new Error("Query cancelled");
+    }
+
+    this.abortController = new AbortController();
+    this.isQueryRunning = true;
+    this.stopRequested = false;
+    this.queryStarted = new Date();
+    this.currentTool = `LLM: ${providerConfig.label || provider}`;
+    this.lastTool = this.currentTool;
+
+    let timedOut = false;
+    const queryTimeout = setTimeout(() => {
+      timedOut = true;
+      console.warn(`CLI provider ${provider} timed out after ${timeoutMs}ms`);
+      this.abortController?.abort();
+    }, timeoutMs);
+
+    const responseParts: string[] = [];
+
+    try {
+      await statusCallback("tool", this.currentTool);
+      const nativeTools = providerConfig.tools
+        ? await nativeToolRuntime.listTools()
+        : [];
+      let prompt = message;
+
+      if (nativeTools.length) {
+        prompt = `${OPENAI_SYSTEM_PROMPT}
+
+Available tools:
+${nativeTools
+  .map(
+    (tool) =>
+      `- ${tool.name}: ${tool.description || ""}\n  input_schema: ${JSON.stringify(tool.inputSchema)}`
+  )
+  .join("\n")}
+
+If you need a tool, reply ONLY with JSON in this exact shape:
+{"tool":"tool_name","arguments":{...}}
+
+After tool results are provided, answer normally. ${responseLanguageInstruction()}
+
+User message:
+${message}`;
+      }
+
+      for (let step = 0; step < 6; step++) {
+        const output = await this.runCliOnce(
+          prompt,
+          provider,
+          providerConfig
+        );
+        const toolRequest = nativeTools.length
+          ? parseCliToolRequest(output)
+          : null;
+
+        if (!toolRequest) {
+          if (output) {
+            responseParts.push(output);
+            await statusCallback("text", output, 0);
+            await statusCallback("segment_end", output, 0);
+          }
+          break;
+        }
+
+        const result = await nativeToolRuntime.callTool(
+          toolRequest.tool,
+          toolRequest.arguments || {},
+          statusCallback,
+          {
+            provider,
+            override: providerConfig.toolPolicy,
+          }
+        );
+        prompt = `${prompt}
+
+Tool result for ${toolRequest.tool}:
+${result}
+
+Now either call another tool with the same JSON-only format, or provide the final answer. ${responseLanguageInstruction()}`;
+      }
+    } catch (error) {
+      if (timedOut) {
+        this.lastError = `${provider} timed out`;
+        this.lastErrorTime = new Date();
+        throw new Error(`${provider} timed out`);
+      }
+
+      const errorStr = String(error).toLowerCase();
+      if (errorStr.includes("abort") || errorStr.includes("cancel")) {
+        throw error;
+      }
+
+      console.error(`Error in CLI provider ${provider}: ${error}`);
+      this.lastError = String(error).slice(0, 100);
+      this.lastErrorTime = new Date();
+      throw error;
+    } finally {
+      clearTimeout(queryTimeout);
+      this.isQueryRunning = false;
+      this.abortController = null;
+      this.queryStarted = null;
+      this.currentTool = null;
+    }
+
+    this.lastActivity = new Date();
+    this.lastError = null;
+    this.lastErrorTime = null;
+    await statusCallback("done", "");
+
+    if (responseParts.length === 0) {
+      const fallback = `${providerConfig.label || provider} returned no response.`;
+      await statusCallback("text", fallback, 0);
+      await statusCallback("segment_end", fallback, 0);
+      return fallback;
+    }
+
+    return responseParts.join("\n");
+  }
+
+  private async runCliOnce(
+    prompt: string,
+    provider: string,
+    providerConfig: CliProviderConfig
+  ): Promise<string> {
+    const args = [...(providerConfig.args || [])];
+    if ((providerConfig.promptMode || "stdin") === "arg-last") {
+      args.push(prompt);
+    }
+
+    const proc = Bun.spawn([providerConfig.command, ...args], {
+      cwd: providerConfig.cwd || WORKING_DIR,
+      env: {
+        ...process.env,
+        ...(providerConfig.env || {}),
+      },
+      stdin: (providerConfig.promptMode || "stdin") === "stdin"
+        ? "pipe"
+        : "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      signal: this.abortController?.signal,
+    });
+
+    if ((providerConfig.promptMode || "stdin") === "stdin") {
+      const stdin = proc.stdin;
+      if (!stdin) {
+        throw new Error(`${providerConfig.label || provider} stdin is unavailable`);
+      }
+      stdin.write(prompt);
+      stdin.end();
+    }
+
+    const stdoutPromise = new Response(proc.stdout).text();
+    const stderrPromise = new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    const [stdout, stderr] = await Promise.all([
+      stdoutPromise,
+      stderrPromise,
+    ]);
+
+    if (this.stopRequested) {
+      throw new Error("Query cancelled");
+    }
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `${providerConfig.label || provider} exited with code ${exitCode}: ${stderr.slice(0, 500)}`
+      );
+    }
+
+    return (stdout.trim() || stderr.trim()).trim();
   }
 
   /**
@@ -511,7 +986,7 @@ class ClaudeSession {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
-        title: this.conversationTitle || "Sessione senza titolo",
+        title: this.conversationTitle || t.defaultSessionTitle,
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -572,13 +1047,13 @@ class ClaudeSession {
     const sessionData = history.sessions.find((s) => s.session_id === sessionId);
 
     if (!sessionData) {
-      return [false, "Sessione non trovata"];
+      return [false, t.sessionNotFound];
     }
 
     if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
       return [
         false,
-        `Sessione per directory diversa: ${sessionData.working_dir}`,
+        t.sessionDifferentDirectory(sessionData.working_dir),
       ];
     }
 
@@ -592,7 +1067,7 @@ class ClaudeSession {
 
     return [
       true,
-      `Ripresa sessione: "${sessionData.title}"`,
+      t.sessionResumed(sessionData.title),
     ];
   }
 
@@ -602,7 +1077,7 @@ class ClaudeSession {
   resumeLast(): [success: boolean, message: string] {
     const sessions = this.getSessionList();
     if (sessions.length === 0) {
-      return [false, "Nessuna sessione salvata"];
+      return [false, t.noSavedSessions];
     }
 
     return this.resumeSession(sessions[0]!.session_id);

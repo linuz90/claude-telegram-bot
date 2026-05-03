@@ -42,8 +42,14 @@ cd claude-telegram-bot-ts
 cp .env.example .env
 # Edit .env with your credentials
 
+cp mcp-config.example.ts mcp-config.ts
+# Edit mcp-config.ts with your MCP servers
+
+# Optional: add non-Claude providers
+cp llm-providers.example.ts llm-providers.ts
+
 bun install
-bun run src/index.ts
+bun run start
 ```
 
 ### Prerequisites
@@ -67,7 +73,7 @@ The bot uses the `@anthropic-ai/claude-agent-sdk` which supports two authenticat
 **API Key**: For environments where Claude Code isn't installed. Get a key from [console.anthropic.com](https://console.anthropic.com/) and add to `.env`:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-api03-...
+ANTHROPIC_API_KEY=replace_me
 ```
 
 Note: API usage is billed per token and can get expensive quickly for heavy use.
@@ -78,7 +84,7 @@ Note: API usage is billed per token and can get expensive quickly for heavy use.
 
 1. Open [@BotFather](https://t.me/BotFather) on Telegram
 2. Send `/newbot` and follow the prompts to create your bot
-3. Copy the token (looks like `1234567890:ABC-DEF...`)
+3. Copy the token (looks like `replace_me`)
 
 Then send `/setcommands` to BotFather and paste this:
 
@@ -93,16 +99,20 @@ restart - Restart the bot
 
 ### 2. Configure Environment
 
-Create `.env` with your settings:
+Copy the example environment file, then edit `.env` with your settings:
+
+```bash
+cp .env.example .env
+```
 
 ```bash
 # Required
-TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF...   # From @BotFather
+TELEGRAM_BOT_TOKEN=replace_me                  # From @BotFather
 TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
 
 # Recommended
 CLAUDE_WORKING_DIR=/path/to/your/folder    # Where Claude runs (loads CLAUDE.md, skills, MCP)
-OPENAI_API_KEY=sk-...                      # For voice transcription
+OPENAI_API_KEY=replace_me                      # For voice transcription
 ```
 
 **Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram.
@@ -119,13 +129,13 @@ To customize, set `ALLOWED_PATHS` in `.env` (comma-separated). Note: this **over
 ALLOWED_PATHS=/your/project,/other/path,~/.claude
 ```
 
-### 3. Configure MCP Servers (Optional)
+### 3. Configure MCP Servers
 
-Copy and edit the MCP config:
+Copy the example MCP config, then edit `mcp-config.ts` for your tools:
 
 ```bash
-cp mcp-config.ts mcp-config.local.ts
-# Edit mcp-config.local.ts with your MCP servers
+cp mcp-config.example.ts mcp-config.ts
+# Edit mcp-config.ts with your MCP servers
 ```
 
 The bot includes two built-in MCP servers:
@@ -133,6 +143,38 @@ The bot includes two built-in MCP servers:
 - **`send_file`** — Lets Claude send files (images, videos, audio, documents) back to the chat
 
 Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools.
+
+### 4. Configure Optional LLM Providers
+
+Claude is available by default. To add local CLI or OpenAI-compatible providers, copy the example provider registry:
+
+```bash
+cp llm-providers.example.ts llm-providers.ts
+# Edit llm-providers.ts for Codex, Gemini, OpenRouter, local models, etc.
+```
+
+Then switch providers from Telegram:
+
+```text
+/llm
+/llm codex
+/llm gemini
+```
+
+### 5. Run
+
+With Bun:
+
+```bash
+bun install
+bun run start
+```
+
+With Docker:
+
+```bash
+docker compose up -d --build
+```
 
 ## Bot Commands
 
@@ -214,7 +256,7 @@ Multiple layers protect against misuse:
 **Claude authentication issues**
 
 - For CLI auth: run `claude` in terminal and verify you're logged in
-- For API key: check `ANTHROPIC_API_KEY` is set and starts with `sk-ant-api03-`
+- For API key: check `ANTHROPIC_API_KEY` is set
 - Verify the API key has credits at [console.anthropic.com](https://console.anthropic.com/)
 
 **Voice messages fail**

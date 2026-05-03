@@ -13,6 +13,7 @@ import {
   handleNew,
   handleStop,
   handleStatus,
+  handleLlm,
   handleResume,
   handleRestart,
   handleRetry,
@@ -24,6 +25,7 @@ import {
   handleVideo,
   handleCallback,
 } from "./handlers";
+import { t } from "./i18n";
 
 // Create bot instance
 const bot = new Bot(TELEGRAM_TOKEN);
@@ -55,6 +57,7 @@ bot.command("start", handleStart);
 bot.command("new", handleNew);
 bot.command("stop", handleStop);
 bot.command("status", handleStatus);
+bot.command("llm", handleLlm);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
@@ -114,7 +117,7 @@ if (existsSync(RESTART_FILE)) {
       await bot.api.editMessageText(
         data.chat_id,
         data.message_id,
-        "✅ Bot restarted"
+        t.restarted
       );
     }
     unlinkSync(RESTART_FILE);
@@ -124,11 +127,26 @@ if (existsSync(RESTART_FILE)) {
   }
 }
 
-// Start with concurrent runner (commands work immediately)
-const runner = run(bot);
+// Start with concurrent runner (commands work immediately).
+const runner = run(bot, {
+  runner: {
+    fetch: { timeout: 60 },
+    maxRetryTime: Number.POSITIVE_INFINITY,
+    retryInterval: "exponential",
+  },
+});
+
+let shuttingDown = false;
+runner.task()?.catch((error) => {
+  if (!shuttingDown) {
+    console.error("Polling runner crashed:", error);
+    process.exit(1);
+  }
+});
 
 // Graceful shutdown
 const stopRunner = () => {
+  shuttingDown = true;
   if (runner.isRunning()) {
     console.log("Stopping bot...");
     runner.stop();
