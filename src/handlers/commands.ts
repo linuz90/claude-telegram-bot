@@ -6,8 +6,39 @@
 
 import type { Context } from "grammy";
 import { session } from "../session";
-import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
+import {
+  WORKING_DIR,
+  ALLOWED_USERS,
+  RESTART_FILE,
+} from "../config";
+import { loadLastMessage } from "../last-message";
+import { dateLocale, t } from "../i18n";
+import {
+  describeLlmProvider,
+  getActiveLlmProvider,
+  getLlmProviderConfig,
+  getLlmProviderIds,
+  isLlmProvider,
+  setActiveLlmProvider,
+} from "../llm-provider";
 import { isAuthorized } from "../security";
+
+function getProviderAvailability(provider: string): [available: boolean, reason: string] {
+  const config = getLlmProviderConfig(provider);
+  if (config.type === "openai-chat") {
+    const apiKeyEnv = config.apiKeyEnv || "OPENAI_API_KEY";
+    return process.env[apiKeyEnv]
+      ? [true, ""]
+      : [false, t.llmApiKeyMissing(apiKeyEnv)];
+  }
+  if (config.type === "cli") {
+    const found = config.command.includes("/") || Bun.which(config.command);
+    return found
+      ? [true, ""]
+      : [false, t.llmCommandMissing(config.command)];
+  }
+  return [true, ""];
+}
 
 /**
  * /start - Show welcome message and status.
@@ -17,21 +48,24 @@ export async function handleStart(ctx: Context): Promise<void> {
   const username = ctx.from?.username || "unknown";
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply(t.unauthorizedOwner);
     return;
   }
 
   const status = session.isActive ? "Active session" : "No active session";
   const workDir = WORKING_DIR;
+  const llm = describeLlmProvider();
 
   await ctx.reply(
     `🤖 <b>Claude Telegram Bot</b>\n\n` +
       `Status: ${status}\n` +
+      `LLM: <code>${llm}</code>\n` +
       `Working directory: <code>${workDir}</code>\n\n` +
       `<b>Commands:</b>\n` +
       `/new - Start fresh session\n` +
       `/stop - Stop current query\n` +
       `/status - Show detailed status\n` +
+      `/llm - Show or switch LLM provider\n` +
       `/resume - Resume last session\n` +
       `/retry - Retry last message\n` +
       `/restart - Restart the bot\n\n` +
@@ -50,7 +84,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
@@ -66,7 +100,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   // Clear session
   await session.kill();
 
-  await ctx.reply("🆕 Session cleared. Next message starts fresh.");
+  await ctx.reply(t.newDone);
 }
 
 /**
@@ -76,7 +110,7 @@ export async function handleStop(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
@@ -99,11 +133,12 @@ export async function handleStatus(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
-  const lines: string[] = ["📊 <b>Bot Status</b>\n"];
+  const lines: string[] = [t.statusTitle];
+  lines.push(`🧠 LLM: <code>${describeLlmProvider()}</code>`);
 
   // Session status
   if (session.isActive) {
@@ -166,18 +201,75 @@ export async function handleStatus(ctx: Context): Promise<void> {
 }
 
 /**
+ * /llm - Show or switch the active LLM provider.
+ */
+export async function handleLlm(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply(t.unauthorized);
+    return;
+  }
+
+  const match = String((ctx as Context & { match?: string }).match || "")
+    .trim()
+    .toLowerCase();
+
+  if (!match || match === "status") {
+    const providerLines = getLlmProviderIds()
+      .map((id) => {
+        const active = id === getActiveLlmProvider() ? "•" : "-";
+        const [available, reason] = getProviderAvailability(id);
+        const availability = available ? "" : ` (${reason})`;
+        return `${active} <code>${id}</code> - ${describeLlmProvider(id)}${availability}`;
+      })
+      .join("\n");
+
+    await ctx.reply(
+      t.llmActive(getActiveLlmProvider(), describeLlmProvider(), providerLines),
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  if (!isLlmProvider(match)) {
+    await ctx.reply(
+      t.llmInvalid(getLlmProviderIds().join(", "))
+    );
+    return;
+  }
+
+  const [available, reason] = getProviderAvailability(match);
+  if (!available) {
+    await ctx.reply(t.llmUnavailable(match, reason));
+    return;
+  }
+
+  if (session.isRunning) {
+    await ctx.reply(t.llmBusy);
+    return;
+  }
+
+  setActiveLlmProvider(match);
+  await ctx.reply(
+    t.llmChanged(match, describeLlmProvider(match)),
+    { parse_mode: "HTML" }
+  );
+}
+
+/**
  * /resume - Show list of sessions to resume with inline keyboard.
  */
 export async function handleResume(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
   if (session.isActive) {
-    await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
+    await ctx.reply(t.resumeActive);
     return;
   }
 
@@ -185,7 +277,7 @@ export async function handleResume(ctx: Context): Promise<void> {
   const sessions = session.getSessionList();
 
   if (sessions.length === 0) {
-    await ctx.reply("❌ Nessuna sessione salvata.");
+    await ctx.reply(t.resumeEmpty);
     return;
   }
 
@@ -193,11 +285,11 @@ export async function handleResume(ctx: Context): Promise<void> {
   const buttons = sessions.map((s) => {
     // Format date: "18/01 10:30"
     const date = new Date(s.saved_at);
-    const dateStr = date.toLocaleDateString("it-IT", {
+    const dateStr = date.toLocaleDateString(dateLocale(), {
       day: "2-digit",
       month: "2-digit",
     });
-    const timeStr = date.toLocaleTimeString("it-IT", {
+    const timeStr = date.toLocaleTimeString(dateLocale(), {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -214,7 +306,7 @@ export async function handleResume(ctx: Context): Promise<void> {
     ];
   });
 
-  await ctx.reply("📋 <b>Sessioni salvate</b>\n\nSeleziona una sessione da riprendere:", {
+  await ctx.reply(t.resumeTitle, {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: buttons,
@@ -230,11 +322,11 @@ export async function handleRestart(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
-  const msg = await ctx.reply("🔄 Restarting bot...");
+  const msg = await ctx.reply(t.restarting);
 
   // Save message info so we can update it after restart
   if (chatId && msg.message_id) {
@@ -266,24 +358,25 @@ export async function handleRetry(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply(t.unauthorized);
     return;
   }
 
   // Check if there's a message to retry
-  if (!session.lastMessage) {
-    await ctx.reply("❌ No message to retry.");
+  const lastMessage = session.lastMessage || loadLastMessage();
+  if (!lastMessage) {
+    await ctx.reply(t.retryMissing);
     return;
   }
 
   // Check if something is already running
   if (session.isRunning) {
-    await ctx.reply("⏳ A query is already running. Use /stop first.");
+    await ctx.reply(t.retryBusy);
     return;
   }
 
-  const message = session.lastMessage;
-  await ctx.reply(`🔄 Retrying: "${message.slice(0, 50)}${message.length > 50 ? "..." : ""}"`);
+  const message = lastMessage;
+  await ctx.reply(t.retrying(`${message.slice(0, 50)}${message.length > 50 ? "..." : ""}`));
 
   // Simulate sending the message again by emitting a fake text message event
   // We do this by directly calling the text handler logic
