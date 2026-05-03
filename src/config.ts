@@ -6,7 +6,7 @@
 
 import { homedir } from "os";
 import { resolve, dirname } from "path";
-import type { McpServerConfig } from "./types";
+import type { LlmProviderConfig, McpServerConfig } from "./types";
 
 // ============== Environment Setup ==============
 
@@ -44,6 +44,23 @@ export const ALLOWED_USERS: number[] = (
 
 export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+export const WHISPER_SERVICE_URL = process.env.WHISPER_SERVICE_URL || "";
+export const LAST_MESSAGE_FILE =
+  process.env.LAST_MESSAGE_FILE || `${WORKING_DIR}/.runtime/last-message.json`;
+export const LLM_PROVIDER_FILE =
+  process.env.LLM_PROVIDER_FILE || `${WORKING_DIR}/.runtime/llm-provider.json`;
+export const OPENAI_CHAT_MODEL =
+  process.env.OPENAI_CHAT_MODEL || "gpt-4.1-mini";
+export const PRIMARY_LANGUAGE = (process.env.PRIMARY_LANGUAGE || "en")
+  .trim()
+  .toLowerCase();
+export const RECENT_CONTEXT_KEYWORDS = (
+  process.env.RECENT_CONTEXT_KEYWORDS ||
+  "last message,latest message,last conversation,transcript,son mesaj,son mesaja,son mesajı,son mesaji,son konuşma,son konusma,transkript"
+)
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
 
 // ============== Claude CLI Path ==============
 
@@ -83,6 +100,54 @@ try {
 
 export { MCP_SERVERS };
 
+// ============== LLM Provider Configuration ==============
+
+const BUILT_IN_LLM_PROVIDERS: Record<string, LlmProviderConfig> = {
+  claude: {
+    type: "claude-code",
+    label: "Claude Code",
+    description: "Full agent mode with tools, MCP, files, and terminal",
+    tools: true,
+  },
+  openai: {
+    type: "openai-chat",
+    label: "OpenAI",
+    description: "OpenAI chat with native MCP tools",
+    model: OPENAI_CHAT_MODEL,
+    apiKeyEnv: "OPENAI_API_KEY",
+    tools: true,
+  },
+};
+
+let LLM_PROVIDERS: Record<string, LlmProviderConfig> = {
+  ...BUILT_IN_LLM_PROVIDERS,
+};
+
+try {
+  const llmConfigPath = resolve(dirname(import.meta.dir), "llm-providers.ts");
+  const llmModule = await import(llmConfigPath).catch(() => null);
+  if (llmModule?.LLM_PROVIDERS) {
+    LLM_PROVIDERS = {
+      ...LLM_PROVIDERS,
+      ...(llmModule.LLM_PROVIDERS as Record<string, LlmProviderConfig>),
+    };
+    console.log(
+      `Loaded ${Object.keys(llmModule.LLM_PROVIDERS).length} LLM providers from llm-providers.ts`
+    );
+  }
+} catch {
+  console.log("No llm-providers.ts found - using built-in LLM providers");
+}
+
+export { LLM_PROVIDERS };
+
+export type LlmProvider = string;
+export const DEFAULT_LLM_PROVIDER: LlmProvider =
+  process.env.DEFAULT_LLM_PROVIDER &&
+  LLM_PROVIDERS[process.env.DEFAULT_LLM_PROVIDER]
+    ? process.env.DEFAULT_LLM_PROVIDER
+    : "claude";
+
 // ============== Security Configuration ==============
 
 // Allowed directories for file operations
@@ -108,6 +173,9 @@ function buildSafetyPrompt(allowedPaths: string[]): string {
     .map((p) => `   - ${p} (and subdirectories)`)
     .join("\n");
 
+  const languageInstruction =
+    `Use ${PRIMARY_LANGUAGE} as the default response language. If the user clearly writes in another language, reply in that language.`;
+
   return `
 CRITICAL SAFETY RULES FOR TELEGRAM BOT:
 
@@ -126,6 +194,14 @@ ${pathsList}
    - Commands that could damage the system
 
 4. For any destructive or irreversible action, ALWAYS ask for confirmation first.
+
+MEMORY PROTOCOL:
+- When memory or knowledge MCP tools are available, use them before answering questions that depend on saved user, project, or long-term context.
+- Prefer read/search/recall/list/status style tools before guessing from chat context.
+- Save important new user preferences, project decisions, durable facts, and session summaries only when an appropriate non-destructive memory tool is available and policy allows it.
+- ${languageInstruction}
+- Do not hard-code assumptions about a specific memory provider. Choose tools based on their names, descriptions, schemas, and policy classification.
+- If no relevant memory tool exists or policy blocks it, say that the configured tools cannot answer the saved-context request.
 
 You are running via Telegram, so the user cannot easily undo mistakes. Be extra careful!
 `;
@@ -151,7 +227,9 @@ export const QUERY_TIMEOUT_MS = 180_000;
 // ============== Voice Transcription ==============
 
 const BASE_TRANSCRIPTION_PROMPT = `Transcribe this voice message accurately.
-The speaker may use multiple languages (English, and possibly others).
+The speaker may use the configured primary language (${PRIMARY_LANGUAGE}) and may mix in English technical terms.
+Preserve simple spoken test phrases, words, and numbers literally.
+Common spoken terms may include memory systems, project names, framework names, search, save, chapters, expectations, and reality.
 Focus on accuracy for proper nouns, technical terms, and commands.`;
 
 let TRANSCRIPTION_CONTEXT = "";

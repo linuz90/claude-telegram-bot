@@ -50,11 +50,11 @@ export function convertMarkdownToHtml(text: string): string {
   // Also handle *text* as bold (single asterisk)
   text = text.replace(/(?<!\*)\*(.+?)\*(?!\*)/g, "<b>$1</b>");
 
-  // Double underscore: __text__ -> <b>text</b>
-  text = text.replace(/__([^_]+)__/g, "<b>$1</b>");
+  // Underscore emphasis must not match identifiers like room_abcd or snake_case.
+  text = text.replace(/(^|[^\w])__([^_\n]+?)__(?=[^\w]|$)/g, "$1<b>$2</b>");
 
-  // Italic: _text_ -> <i>text</i> (but not __text__)
-  text = text.replace(/(?<!_)_([^_]+)_(?!_)/g, "<i>$1</i>");
+  // Italic: _text_ -> <i>text</i> (but not word_internals or __bold__)
+  text = text.replace(/(^|[^\w])_([^_\n]+?)_(?=[^\w]|$)/g, "$1<i>$2</i>");
 
   // Blockquotes: &gt; text -> <blockquote>text</blockquote>
   text = convertBlockquotes(text);

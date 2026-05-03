@@ -34,7 +34,7 @@
 
         <!-- Optional: For voice transcription -->
         <key>OPENAI_API_KEY</key>
-        <string>sk-...</string>
+        <string>replace_me</string>
 
         <!-- Optional: Comma-separated paths Claude can access -->
         <key>ALLOWED_PATHS</key>
