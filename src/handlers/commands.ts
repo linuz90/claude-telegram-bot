@@ -6,6 +6,7 @@
 
 import type { Context } from "grammy";
 import { session } from "../session";
+import { currentModel, setModel, DEFAULT_MODEL } from "../model";
 import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
 
@@ -299,4 +300,36 @@ export async function handleRetry(ctx: Context): Promise<void> {
   } as Context;
 
   await handleText(fakeCtx);
+}
+
+/**
+ * /model - Show or set the Claude model used for new messages.
+ */
+export async function handleModel(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    return;
+  }
+
+  const arg = typeof ctx.match === "string" ? ctx.match.trim() : "";
+
+  if (!arg) {
+    await ctx.reply(
+      `Current model: ${currentModel()}\n\n` +
+        `Usage:\n/model claude-opus-4-8 — switch model\n/model reset — back to default (${DEFAULT_MODEL})\n\n` +
+        `Applies to new messages.`
+    );
+    return;
+  }
+
+  if (arg === "reset") {
+    setModel(null);
+    await ctx.reply(`Model reset to default: ${DEFAULT_MODEL}. Applies to new messages.`);
+    return;
+  }
+
+  setModel(arg);
+  await ctx.reply(`Model set to ${arg}. Applies to new messages.`);
 }

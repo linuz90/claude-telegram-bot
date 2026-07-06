@@ -13,6 +13,7 @@ import {
   handleNew,
   handleStop,
   handleStatus,
+  handleModel,
   handleResume,
   handleRestart,
   handleRetry,
@@ -55,6 +56,7 @@ bot.command("start", handleStart);
 bot.command("new", handleNew);
 bot.command("stop", handleStop);
 bot.command("status", handleStatus);
+bot.command("model", handleModel);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
