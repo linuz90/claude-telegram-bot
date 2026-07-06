@@ -10,7 +10,7 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { readFileSync, appendFileSync } from "fs";
 import { currentModel } from "./model";
 import type { Context } from "grammy";
 import {
@@ -185,6 +185,7 @@ class ClaudeSession {
     }
 
     const isNewSession = !this.isActive;
+    const metricsStart = Date.now();
     const thinkingTokens = getThinkingLevel(message);
     const thinkingLabel =
       { 0: "off", 10000: "normal", 50000: "deep" }[thinkingTokens] ||
@@ -438,6 +439,26 @@ class ClaudeSession {
                 u.cache_read_input_tokens || 0
               } cache_create=${u.cache_creation_input_tokens || 0}`
             );
+          }
+
+          // Latency/usage metrics (opt-in via METRICS_LOG_PATH env)
+          if (process.env.METRICS_LOG_PATH) {
+            try {
+              const u = this.lastUsage;
+              appendFileSync(
+                process.env.METRICS_LOG_PATH,
+                JSON.stringify({
+                  ts: new Date().toISOString(),
+                  latency_ms: Date.now() - metricsStart,
+                  cold_start: isNewSession,
+                  model: currentModel(),
+                  in: u?.input_tokens ?? null,
+                  out: u?.output_tokens ?? null,
+                  cache_read: u?.cache_read_input_tokens ?? 0,
+                  cache_create: u?.cache_creation_input_tokens ?? 0,
+                }) + "\n"
+              );
+            } catch {}
           }
         }
       }
