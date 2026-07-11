@@ -184,6 +184,19 @@ class ClaudeSession {
       process.env.TELEGRAM_CHAT_ID = String(chatId);
     }
 
+    // Auto session boundary — see SESSION_IDLE_BOUNDARY_MS below.
+    if (
+      this.sessionId &&
+      this.lastActivity &&
+      Date.now() - this.lastActivity.getTime() > SESSION_IDLE_BOUNDARY_MS
+    ) {
+      console.log(
+        `Session idle past boundary (${SESSION_IDLE_BOUNDARY_MS / 3_600_000}h) — starting fresh (was ${this.sessionId.slice(0, 8)}...)`
+      );
+      this.sessionId = null;
+      this.conversationTitle = null;
+    }
+
     const isNewSession = !this.isActive;
     const metricsStart = Date.now();
     const thinkingTokens = getThinkingLevel(message);
@@ -633,3 +646,10 @@ class ClaudeSession {
 
 // Global session instance
 export const session = new ClaudeSession();
+
+// Auto session boundary (2026-07-11): one eternal texting session grows to 600k+
+// tokens and every reply after a >5min gap pays a cache-cold re-ingest of all of it
+// (measured: 624k cache_read, multi-minute replies). Sessions older than the idle
+// boundary start fresh instead of resuming. Override: MONDAY_SESSION_IDLE_HOURS.
+export const SESSION_IDLE_BOUNDARY_MS =
+  Number(process.env.MONDAY_SESSION_IDLE_HOURS ?? 4) * 3_600_000;
