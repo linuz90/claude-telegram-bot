@@ -10,7 +10,8 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { readFileSync, appendFileSync, existsSync, writeFileSync } from "fs";
+import { currentModel } from "./model";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
@@ -54,6 +55,60 @@ function getThinkingLevel(message: string): number {
 
   // Default: no thinking
   return 0;
+}
+
+/**
+ * Console ledger injection (Rithvik's 2026-07-18 design, deterministic by
+ * construction): scheduled jobs deliver messages to him via the reminders
+ * dispatcher, which bypasses this bot entirely — Monday's session never sees
+ * what was sent, so follow-up questions used to hit a context island. The
+ * dispatcher now logs every delivered message to monday/console.jsonl; this
+ * function feeds that ledger into the session prompt:
+ *   - fresh session → the last CONSOLE_TAIL_N entries (recent context)
+ *   - resumed session → only entries NEW since the last injection (offset
+ *     persisted across bot restarts), capped at CONSOLE_TAIL_N
+ * n=15 is his call ("bump to 20 only if it feels sparse"); an entry is ~200
+ * tokens so the cap keeps injection ~3k tokens worst-case, and the
+ * no-repeat offset keeps the prompt cache-friendly.
+ */
+const CONSOLE_FILE = `${WORKING_DIR}/console.jsonl`;
+const CONSOLE_OFFSET_FILE = "/tmp/claude-telegram-console-offset.json";
+const CONSOLE_TAIL_N = 15;
+
+function buildConsoleInjection(isNewSession: boolean): string {
+  try {
+    if (!existsSync(CONSOLE_FILE)) return "";
+    const lines = readFileSync(CONSOLE_FILE, "utf-8")
+      .split("\n")
+      .filter((l) => l.trim());
+    let offset = 0;
+    try {
+      offset =
+        JSON.parse(readFileSync(CONSOLE_OFFSET_FILE, "utf-8")).offset ?? 0;
+    } catch {
+      // no offset file yet — first run
+    }
+    if (offset > lines.length) offset = 0; // ledger rotated/truncated — reset
+    let picked = isNewSession ? lines.slice(-CONSOLE_TAIL_N) : lines.slice(offset);
+    picked = picked.slice(-CONSOLE_TAIL_N);
+    writeFileSync(CONSOLE_OFFSET_FILE, JSON.stringify({ offset: lines.length }));
+    if (picked.length === 0) return "";
+    const rendered = picked
+      .map((l) => {
+        try {
+          const e = JSON.parse(l);
+          return `${e.ts}: ${e.text}`;
+        } catch {
+          return l;
+        }
+      })
+      .join("\n---\n");
+    console.log(`Console injection: ${picked.length} entr${picked.length === 1 ? "y" : "ies"} (${isNewSession ? "fresh session tail" : "new since last"})`);
+    return `[console ledger — messages you (Monday) recently delivered to Rithvik out-of-band via Telegram. Context for his follow-up questions only: do not re-send, re-acknowledge, or summarize these unless he asks.]\n${rendered}\n[end console ledger]\n\n`;
+  } catch (e) {
+    console.warn("Console injection failed (continuing without):", e);
+    return "";
+  }
 }
 
 /**
@@ -183,7 +238,21 @@ class ClaudeSession {
       process.env.TELEGRAM_CHAT_ID = String(chatId);
     }
 
+    // Auto session boundary — see SESSION_IDLE_BOUNDARY_MS below.
+    if (
+      this.sessionId &&
+      this.lastActivity &&
+      Date.now() - this.lastActivity.getTime() > SESSION_IDLE_BOUNDARY_MS
+    ) {
+      console.log(
+        `Session idle past boundary (${SESSION_IDLE_BOUNDARY_MS / 3_600_000}h) — starting fresh (was ${this.sessionId.slice(0, 8)}...)`
+      );
+      this.sessionId = null;
+      this.conversationTitle = null;
+    }
+
     const isNewSession = !this.isActive;
+    const metricsStart = Date.now();
     const thinkingTokens = getThinkingLevel(message);
     const thinkingLabel =
       { 0: "off", 10000: "normal", 50000: "deep" }[thinkingTokens] ||
@@ -208,9 +277,15 @@ class ClaudeSession {
       messageToSend = datePrefix + message;
     }
 
+    // Console ledger context (see buildConsoleInjection above)
+    const consoleBlock = buildConsoleInjection(isNewSession);
+    if (consoleBlock) {
+      messageToSend = consoleBlock + messageToSend;
+    }
+
     // Build SDK V1 options - supports all features
     const options: Options = {
-      model: "claude-sonnet-4-5",
+      model: currentModel(),
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
@@ -438,6 +513,26 @@ class ClaudeSession {
               } cache_create=${u.cache_creation_input_tokens || 0}`
             );
           }
+
+          // Latency/usage metrics (opt-in via METRICS_LOG_PATH env)
+          if (process.env.METRICS_LOG_PATH) {
+            try {
+              const u = this.lastUsage;
+              appendFileSync(
+                process.env.METRICS_LOG_PATH,
+                JSON.stringify({
+                  ts: new Date().toISOString(),
+                  latency_ms: Date.now() - metricsStart,
+                  cold_start: isNewSession,
+                  model: currentModel(),
+                  in: u?.input_tokens ?? null,
+                  out: u?.output_tokens ?? null,
+                  cache_read: u?.cache_read_input_tokens ?? 0,
+                  cache_create: u?.cache_creation_input_tokens ?? 0,
+                }) + "\n"
+              );
+            } catch {}
+          }
         }
       }
 
@@ -611,3 +706,10 @@ class ClaudeSession {
 
 // Global session instance
 export const session = new ClaudeSession();
+
+// Auto session boundary (2026-07-11): one eternal texting session grows to 600k+
+// tokens and every reply after a >5min gap pays a cache-cold re-ingest of all of it
+// (measured: 624k cache_read, multi-minute replies). Sessions older than the idle
+// boundary start fresh instead of resuming. Override: MONDAY_SESSION_IDLE_HOURS.
+export const SESSION_IDLE_BOUNDARY_MS =
+  Number(process.env.MONDAY_SESSION_IDLE_HOURS ?? 4) * 3_600_000;
