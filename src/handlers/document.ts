@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { getSession } from "../ext/session-manager";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
@@ -217,6 +217,7 @@ async function processArchive(
   username: string,
   chatId: number
 ): Promise<void> {
+  const session = getSession(ctx);
   const stopProcessing = session.startProcessing();
   const typing = startTypingIndicator(ctx);
 
@@ -317,6 +318,7 @@ async function processDocuments(
   username: string,
   chatId: number
 ): Promise<void> {
+  const session = getSession(ctx);
   // Mark processing started
   const stopProcessing = session.startProcessing();
 

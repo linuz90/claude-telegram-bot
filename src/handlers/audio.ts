@@ -7,7 +7,7 @@
 
 import type { Context } from "grammy";
 import { unlinkSync } from "fs";
-import { session } from "../session";
+import { getSession } from "../ext/session-manager";
 import { ALLOWED_USERS, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
 import {
@@ -62,6 +62,7 @@ export async function processAudioFile(
     return;
   }
 
+  const session = getSession(ctx);
   const stopProcessing = session.startProcessing();
   const typing = startTypingIndicator(ctx);
 
