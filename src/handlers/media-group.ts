@@ -11,7 +11,7 @@ import type { PendingMediaGroup } from "../types";
 import { MEDIA_GROUP_TIMEOUT } from "../config";
 import { rateLimiter } from "../security";
 import { auditLogRateLimit } from "../utils";
-import { session } from "../session";
+import { getSession } from "../ext/session-manager";
 
 /**
  * Configuration for a media group handler.
@@ -180,6 +180,7 @@ export async function handleProcessingError(
   error: unknown,
   toolMessages: Message[]
 ): Promise<void> {
+  const session = getSession(ctx);
   console.error("Error processing media:", error);
 
   // Clean up tool messages

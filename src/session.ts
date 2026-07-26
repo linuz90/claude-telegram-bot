@@ -77,7 +77,7 @@ function getTextFromMessage(msg: SDKMessage): string | null {
 // Maximum number of sessions to keep in history
 const MAX_SESSIONS = 5;
 
-class ClaudeSession {
+export class ClaudeSession {
   sessionId: string | null = null;
   lastActivity: Date | null = null;
   queryStarted: Date | null = null;
@@ -94,6 +94,11 @@ class ClaudeSession {
   private stopRequested = false;
   private _isProcessing = false;
   private _wasInterruptedByNewMessage = false;
+
+  // sessionKey distinguishes concurrent per-thread instances in the session
+  // history file (see src/ext/session-manager.ts). "default" preserves the
+  // pre-existing single-session behavior exactly.
+  constructor(private sessionKey: string = "default") {}
 
   get isActive(): boolean {
     return this.sessionId !== null;
@@ -512,6 +517,7 @@ class ClaudeSession {
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
         title: this.conversationTitle || "Sessione senza titolo",
+        session_key: this.sessionKey,
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -558,9 +564,11 @@ class ClaudeSession {
    */
   getSessionList(): SavedSession[] {
     const history = this.loadSessionHistory();
-    // Filter to only sessions for current working directory
+    // Filter to only sessions for current working directory and this thread's key
     return history.sessions.filter(
-      (s) => !s.working_dir || s.working_dir === WORKING_DIR
+      (s) =>
+        (!s.working_dir || s.working_dir === WORKING_DIR) &&
+        (s.session_key ?? "default") === this.sessionKey
     );
   }
 
