@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+assets
+docs
+launchagent
+.env
+.env.*
+!.env.example
+mcp-config.ts
+*.log
+tasks

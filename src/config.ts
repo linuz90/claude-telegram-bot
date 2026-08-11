@@ -197,10 +197,17 @@ export const TELEGRAM_SAFE_LIMIT = 4000; // Safe limit with buffer for formattin
 export const STREAMING_THROTTLE_MS = 500; // Throttle streaming updates
 export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
 
+// ============== State Directory ==============
+
+// Where persistent runtime state lives. Defaults to /tmp so local behaviour is
+// unchanged. In Docker point this at a mounted volume, otherwise the saved
+// session is lost on every restart and /resume stops working after a deploy.
+export const STATE_DIR = (process.env.STATE_DIR || "/tmp").replace(/\/+$/, "");
+
 // ============== Audit Logging ==============
 
 export const AUDIT_LOG_PATH =
-  process.env.AUDIT_LOG_PATH || "/tmp/claude-telegram-audit.log";
+  process.env.AUDIT_LOG_PATH || `${STATE_DIR}/claude-telegram-audit.log`;
 export const AUDIT_LOG_JSON =
   (process.env.AUDIT_LOG_JSON || "false").toLowerCase() === "true";
 
@@ -219,12 +226,19 @@ export const RATE_LIMIT_WINDOW = parseInt(
 
 // ============== File Paths ==============
 
-export const SESSION_FILE = "/tmp/claude-telegram-session.json";
-export const RESTART_FILE = "/tmp/claude-telegram-restart.json";
-export const TEMP_DIR = "/tmp/telegram-bot";
+export const SESSION_FILE = `${STATE_DIR}/claude-telegram-session.json`;
+export const RESTART_FILE = `${STATE_DIR}/claude-telegram-restart.json`;
+export const TEMP_DIR = `${STATE_DIR}/telegram-bot`;
 
-// Temp paths that are always allowed for bot operations
-export const TEMP_PATHS = ["/tmp/", "/private/tmp/", "/var/folders/"];
+// Paths the agent may always read from. TEMP_DIR has to be in here: it is where
+// Telegram downloads (photos, documents, voice notes) land before Claude reads
+// them, and with a custom STATE_DIR that is no longer under /tmp.
+export const TEMP_PATHS = [
+  "/tmp/",
+  "/private/tmp/",
+  "/var/folders/",
+  `${TEMP_DIR}/`,
+];
 
 // Ensure temp directory exists
 await Bun.write(`${TEMP_DIR}/.keep`, "");
