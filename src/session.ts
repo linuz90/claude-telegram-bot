@@ -18,7 +18,6 @@ import {
   SAFETY_PROMPT,
   SESSION_FILE,
   STREAMING_THROTTLE_MS,
-  TEMP_PATHS,
   THINKING_DEEP_KEYWORDS,
   THINKING_KEYWORDS,
   WORKING_DIR,
@@ -28,7 +27,8 @@ import {
   checkPendingAskUserRequests,
   checkPendingSendFileRequests,
 } from "./handlers/streaming";
-import { checkCommandSafety, isPathAllowed } from "./security";
+import { DENY_RULES, createPermissionHooks } from "./permissions";
+import { BOT_MODEL, buildProviderEnv } from "./provider";
 import type {
   SavedSession,
   SessionHistory,
@@ -210,7 +210,7 @@ class ClaudeSession {
 
     // Build SDK V1 options - supports all features
     const options: Options = {
-      model: "claude-sonnet-4-5",
+      model: BOT_MODEL,
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
@@ -220,6 +220,14 @@ class ClaudeSession {
       maxThinkingTokens: thinkingTokens,
       additionalDirectories: ALLOWED_PATHS,
       resume: this.sessionId || undefined,
+      // Point the spawned Claude Code at the configured provider. The TypeScript
+      // SDK replaces the child environment wholesale, so buildProviderEnv()
+      // copies process.env in first.
+      env: buildProviderEnv(),
+      // Both of these are still enforced under bypassPermissions: deny rules are
+      // evaluated before the permission mode, and hooks run before everything.
+      disallowedTools: DENY_RULES,
+      hooks: createPermissionHooks(),
     };
 
     // Add Claude Code executable path if set (required for standalone builds)
@@ -305,36 +313,10 @@ class ClaudeSession {
               const toolName = block.name;
               const toolInput = block.input as Record<string, unknown>;
 
-              // Safety check for Bash commands
-              if (toolName === "Bash") {
-                const command = String(toolInput.command || "");
-                const [isSafe, reason] = checkCommandSafety(command);
-                if (!isSafe) {
-                  console.warn(`BLOCKED: ${reason}`);
-                  await statusCallback("tool", `BLOCKED: ${reason}`);
-                  throw new Error(`Unsafe command blocked: ${reason}`);
-                }
-              }
-
-              // Safety check for file operations
-              if (["Read", "Write", "Edit"].includes(toolName)) {
-                const filePath = String(toolInput.file_path || "");
-                if (filePath) {
-                  // Allow reads from temp paths and .claude directories
-                  const isTmpRead =
-                    toolName === "Read" &&
-                    (TEMP_PATHS.some((p) => filePath.startsWith(p)) ||
-                      filePath.includes("/.claude/"));
-
-                  if (!isTmpRead && !isPathAllowed(filePath)) {
-                    console.warn(
-                      `BLOCKED: File access outside allowed paths: ${filePath}`
-                    );
-                    await statusCallback("tool", `Access denied: ${filePath}`);
-                    throw new Error(`File access blocked: ${filePath}`);
-                  }
-                }
-              }
+              // Safety checks live in the PreToolUse hook (src/permissions.ts).
+              // They used to run here, but by the time a tool_use block reaches
+              // this loop the tool has already been dispatched, so this was a
+              // report rather than a gate.
 
               // Segment ends when tool starts
               if (currentSegmentText) {
