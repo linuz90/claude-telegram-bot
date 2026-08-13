@@ -222,7 +222,7 @@ async function processArchive(
   const typing = startTypingIndicator(ctx);
 
   // Show extraction progress
-  const statusMsg = await ctx.reply(`📦 Extracting <b>${fileName}</b>...`, {
+  const statusMsg = await ctx.reply(`📦 <b>${fileName}</b> uitpakken...`, {
     parse_mode: "HTML",
   });
 
@@ -403,7 +403,7 @@ async function processDocumentPaths(
   }
 
   if (documents.length === 0) {
-    await ctx.reply("❌ Failed to extract any documents.");
+    await ctx.reply("❌ Geen enkel document kon worden uitgepakt.");
     return;
   }
 
@@ -426,13 +426,13 @@ export async function handleDocument(ctx: Context): Promise<void> {
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply("Geen toegang. Neem contact op met de eigenaar van de bot.");
     return;
   }
 
   // 2. Check file size
   if (doc.file_size && doc.file_size > MAX_FILE_SIZE) {
-    await ctx.reply("❌ File too large. Maximum size is 10MB.");
+    await ctx.reply("❌ Bestand te groot. Maximaal 10MB.");
     return;
   }
 
@@ -453,7 +453,7 @@ export async function handleDocument(ctx: Context): Promise<void> {
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
       await ctx.reply(
-        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+        `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
       );
       return;
     }
@@ -464,7 +464,7 @@ export async function handleDocument(ctx: Context): Promise<void> {
       docPath = await downloadDocument(ctx);
     } catch (error) {
       console.error("Failed to download audio document:", error);
-      await ctx.reply("❌ Failed to download audio file.");
+      await ctx.reply("❌ Downloaden van het audiobestand mislukt.");
       return;
     }
 
@@ -488,7 +488,7 @@ export async function handleDocument(ctx: Context): Promise<void> {
     docPath = await downloadDocument(ctx);
   } catch (error) {
     console.error("Failed to download document:", error);
-    await ctx.reply("❌ Failed to download document.");
+    await ctx.reply("❌ Downloaden van het document mislukt.");
     return;
   }
 
@@ -499,7 +499,7 @@ export async function handleDocument(ctx: Context): Promise<void> {
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
       await ctx.reply(
-        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+        `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
       );
       return;
     }
@@ -524,7 +524,7 @@ export async function handleDocument(ctx: Context): Promise<void> {
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
       await ctx.reply(
-        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+        `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
       );
       return;
     }

@@ -8,6 +8,7 @@ import { Bot } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { TELEGRAM_TOKEN, WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "./config";
 import { unlinkSync, readFileSync, existsSync } from "fs";
+import { session } from "./session";
 import {
   handleStart,
   handleNew,
@@ -97,6 +98,11 @@ console.log("Claude Telegram Bot - TypeScript Edition");
 console.log("=".repeat(50));
 console.log(`Working directory: ${WORKING_DIR}`);
 console.log(`Allowed users: ${ALLOWED_USERS.length}`);
+
+// Pick the conversation back up where it stopped. A deploy restarts this
+// process, and without this the user would silently land in an empty session.
+session.restoreLastSession();
+
 console.log("Starting bot...");
 
 // Get bot info first

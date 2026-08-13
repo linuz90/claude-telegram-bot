@@ -91,10 +91,17 @@ export const TRANSCRIPTION_AVAILABLE = !!OPENAI_API_KEY;
 
 // ============== Thinking Keywords ==============
 
+// Add your own language here rather than replacing these: the list is matched
+// as substrings, so a word from another language costs nothing until it appears
+// in a message.
+// Matched as substrings, so every phrasing has to be listed: "denk goed na"
+// does not contain "denk na". Deep keywords are checked first, so a phrase that
+// appears in both lists resolves to deep.
 const thinkingKeywordsStr =
-  process.env.THINKING_KEYWORDS || "think,pensa,ragiona";
+  process.env.THINKING_KEYWORDS || "think,denk na,denk goed na";
 const thinkingDeepKeywordsStr =
-  process.env.THINKING_DEEP_KEYWORDS || "ultrathink,think hard,pensa bene";
+  process.env.THINKING_DEEP_KEYWORDS ||
+  "ultrathink,think hard,denk diep na,denk heel goed na";
 
 export const THINKING_KEYWORDS = thinkingKeywordsStr
   .split(",")
@@ -102,6 +109,23 @@ export const THINKING_KEYWORDS = thinkingKeywordsStr
 export const THINKING_DEEP_KEYWORDS = thinkingDeepKeywordsStr
   .split(",")
   .map((k) => k.trim().toLowerCase());
+
+// ============== Claude Code Config Directory ==============
+
+// Where the CLI keeps its own state, including the conversation transcripts
+// that `resume` reads. The Dockerfile points this at the volume; without that
+// it defaults to $HOME/.claude, which lives in the container layer and is
+// destroyed by every rebuild - taking every resumable conversation with it.
+export const CLAUDE_CONFIG_DIR =
+  process.env.CLAUDE_CONFIG_DIR || `${STATE_DIR}/claude`;
+
+// The CLI stores transcripts per working directory, in a folder named after the
+// path with every non-alphanumeric character replaced by a dash: /app/agent
+// becomes -app-agent.
+export const TRANSCRIPT_DIR = `${CLAUDE_CONFIG_DIR}/projects/${WORKING_DIR.replace(
+  /[^a-zA-Z0-9]/g,
+  "-"
+)}`;
 
 // ============== Media Group Settings ==============
 
@@ -143,7 +167,16 @@ export const RESTART_FILE = `${STATE_DIR}/claude-telegram-restart.json`;
 export const TEMP_DIR = `${STATE_DIR}/telegram-bot`;
 
 // The agent's persistent memory.
-export const MEMORY_DIR = `${STATE_DIR}/memory`;
+//
+// This is Claude Code's own memory directory, not a convention of this
+// template. The CLI derives it from CLAUDE_CONFIG_DIR and the working
+// directory, and its system prompt points the agent here. Do not relocate it
+// and document something else: an agent follows the system prompt over its
+// CLAUDE.md, correctly, and you end up with notes in two places.
+//
+// It sits under STATE_DIR because CLAUDE_CONFIG_DIR does, so it is on the
+// volume and survives a redeploy.
+export const MEMORY_DIR = `${TRANSCRIPT_DIR}/memory`;
 
 // Created here rather than in the Dockerfile: STATE_DIR is a bind mount, so
 // anything the image puts there is replaced by the host directory.

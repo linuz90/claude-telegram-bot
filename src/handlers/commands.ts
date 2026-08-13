@@ -17,28 +17,28 @@ export async function handleStart(ctx: Context): Promise<void> {
   const username = ctx.from?.username || "unknown";
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply("Geen toegang. Neem contact op met de eigenaar van de bot.");
     return;
   }
 
-  const status = session.isActive ? "Active session" : "No active session";
+  const status = session.isActive ? "Actieve sessie" : "Geen actieve sessie";
   const workDir = WORKING_DIR;
 
   await ctx.reply(
     `🤖 <b>Claude Telegram Bot</b>\n\n` +
       `Status: ${status}\n` +
-      `Working directory: <code>${workDir}</code>\n\n` +
-      `<b>Commands:</b>\n` +
-      `/new - Start fresh session\n` +
-      `/stop - Stop current query\n` +
-      `/status - Show detailed status\n` +
-      `/resume - Resume last session\n` +
-      `/retry - Retry last message\n` +
-      `/restart - Restart the bot\n\n` +
+      `Werkmap: <code>${workDir}</code>\n\n` +
+      `<b>Commando's:</b>\n` +
+      `/new - Nieuwe sessie starten\n` +
+      `/stop - Lopende opdracht stoppen\n` +
+      `/status - Uitgebreide status tonen\n` +
+      `/resume - Vorige sessie hervatten\n` +
+      `/retry - Laatste bericht opnieuw sturen\n` +
+      `/restart - Bot herstarten\n\n` +
       `<b>Tips:</b>\n` +
-      `• Prefix with <code>!</code> to interrupt current query\n` +
-      `• Use "think" keyword for extended reasoning\n` +
-      `• Send photos, voice, or documents`,
+      `• Zet <code>!</code> ervoor om de lopende opdracht te onderbreken\n` +
+      `• Gebruik het woord "think" voor uitgebreid redeneren\n` +
+      `• Stuur foto's, spraak of documenten`,
     { parse_mode: "HTML" }
   );
 }
@@ -50,7 +50,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
@@ -66,7 +66,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   // Clear session
   await session.kill();
 
-  await ctx.reply("🆕 Session cleared. Next message starts fresh.");
+  await ctx.reply("🆕 Sessie gewist. Het volgende bericht begint opnieuw.");
 }
 
 /**
@@ -76,7 +76,7 @@ export async function handleStop(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
@@ -99,17 +99,17 @@ export async function handleStatus(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
-  const lines: string[] = ["📊 <b>Bot Status</b>\n"];
+  const lines: string[] = ["📊 <b>Botstatus</b>\n"];
 
   // Session status
   if (session.isActive) {
-    lines.push(`✅ Session: Active (${session.sessionId?.slice(0, 8)}...)`);
+    lines.push(`✅ Sessie: actief (${session.sessionId?.slice(0, 8)}...)`);
   } else {
-    lines.push("⚪ Session: None");
+    lines.push("⚪ Sessie: geen");
   }
 
   // Query status
@@ -117,14 +117,14 @@ export async function handleStatus(ctx: Context): Promise<void> {
     const elapsed = session.queryStarted
       ? Math.floor((Date.now() - session.queryStarted.getTime()) / 1000)
       : 0;
-    lines.push(`🔄 Query: Running (${elapsed}s)`);
+    lines.push(`🔄 Opdracht: bezig (${elapsed}s)`);
     if (session.currentTool) {
       lines.push(`   └─ ${session.currentTool}`);
     }
   } else {
-    lines.push("⚪ Query: Idle");
+    lines.push("⚪ Opdracht: niets te doen");
     if (session.lastTool) {
-      lines.push(`   └─ Last: ${session.lastTool}`);
+      lines.push(`   └─ Laatste: ${session.lastTool}`);
     }
   }
 
@@ -133,20 +133,20 @@ export async function handleStatus(ctx: Context): Promise<void> {
     const ago = Math.floor(
       (Date.now() - session.lastActivity.getTime()) / 1000
     );
-    lines.push(`\n⏱️ Last activity: ${ago}s ago`);
+    lines.push(`\n⏱️ Laatste activiteit: ${ago}s geleden`);
   }
 
   // Usage stats
   if (session.lastUsage) {
     const usage = session.lastUsage;
     lines.push(
-      `\n📈 Last query usage:`,
-      `   Input: ${usage.input_tokens?.toLocaleString() || "?"} tokens`,
-      `   Output: ${usage.output_tokens?.toLocaleString() || "?"} tokens`
+      `\n📈 Verbruik laatste opdracht:`,
+      `   Invoer: ${usage.input_tokens?.toLocaleString() || "?"} tokens`,
+      `   Uitvoer: ${usage.output_tokens?.toLocaleString() || "?"} tokens`
     );
     if (usage.cache_read_input_tokens) {
       lines.push(
-        `   Cache read: ${usage.cache_read_input_tokens.toLocaleString()}`
+        `   Uit cache: ${usage.cache_read_input_tokens.toLocaleString()}`
       );
     }
   }
@@ -156,11 +156,11 @@ export async function handleStatus(ctx: Context): Promise<void> {
     const ago = session.lastErrorTime
       ? Math.floor((Date.now() - session.lastErrorTime.getTime()) / 1000)
       : "?";
-    lines.push(`\n⚠️ Last error (${ago}s ago):`, `   ${session.lastError}`);
+    lines.push(`\n⚠️ Laatste fout (${ago}s geleden):`, `   ${session.lastError}`);
   }
 
   // Working directory
-  lines.push(`\n📁 Working dir: <code>${WORKING_DIR}</code>`);
+  lines.push(`\n📁 Werkmap: <code>${WORKING_DIR}</code>`);
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
 }
@@ -172,12 +172,15 @@ export async function handleResume(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
   if (session.isActive) {
-    await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
+    await ctx.reply(
+      "Er is al een sessie actief - de vorige is bij het opstarten hervat.\n\n" +
+        "Gebruik /new als je toch met een schone lei wilt beginnen."
+    );
     return;
   }
 
@@ -185,7 +188,7 @@ export async function handleResume(ctx: Context): Promise<void> {
   const sessions = session.getSessionList();
 
   if (sessions.length === 0) {
-    await ctx.reply("❌ Nessuna sessione salvata.");
+    await ctx.reply("❌ Geen opgeslagen sessies.");
     return;
   }
 
@@ -193,11 +196,11 @@ export async function handleResume(ctx: Context): Promise<void> {
   const buttons = sessions.map((s) => {
     // Format date: "18/01 10:30"
     const date = new Date(s.saved_at);
-    const dateStr = date.toLocaleDateString("it-IT", {
+    const dateStr = date.toLocaleDateString("nl-NL", {
       day: "2-digit",
       month: "2-digit",
     });
-    const timeStr = date.toLocaleTimeString("it-IT", {
+    const timeStr = date.toLocaleTimeString("nl-NL", {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -214,7 +217,9 @@ export async function handleResume(ctx: Context): Promise<void> {
     ];
   });
 
-  await ctx.reply("📋 <b>Sessioni salvate</b>\n\nSeleziona una sessione da riprendere:", {
+  await ctx.reply("📋 <b>Opgeslagen sessies</b>\n\nNormaal hoef je hier niets te kiezen: de laatste " +
+      "sessie wordt bij het opstarten automatisch hervat. Dit is er voor als je " +
+      "terug wilt naar een eerdere.\n\nKies een sessie:", {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: buttons,
@@ -230,11 +235,11 @@ export async function handleRestart(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
-  const msg = await ctx.reply("🔄 Restarting bot...");
+  const msg = await ctx.reply("🔄 Bot wordt herstart...");
 
   // Save message info so we can update it after restart
   if (chatId && msg.message_id) {
@@ -267,24 +272,24 @@ export async function handleRetry(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
+    await ctx.reply("Geen toegang.");
     return;
   }
 
   // Check if there's a message to retry
   if (!session.lastMessage) {
-    await ctx.reply("❌ No message to retry.");
+    await ctx.reply("❌ Geen bericht om opnieuw te sturen.");
     return;
   }
 
   // Check if something is already running
   if (session.isRunning) {
-    await ctx.reply("⏳ A query is already running. Use /stop first.");
+    await ctx.reply("⏳ Er loopt al een opdracht. Gebruik eerst /stop.");
     return;
   }
 
   const message = session.lastMessage;
-  await ctx.reply(`🔄 Retrying: "${message.slice(0, 50)}${message.length > 50 ? "..." : ""}"`);
+  await ctx.reply(`🔄 Opnieuw: "${message.slice(0, 50)}${message.length > 50 ? "..." : ""}"`);
 
   // Simulate sending the message again by emitting a fake text message event
   // We do this by directly calling the text handler logic

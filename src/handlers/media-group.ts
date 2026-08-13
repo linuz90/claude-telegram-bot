@@ -121,7 +121,7 @@ export function createMediaGroupBuffer(config: MediaGroupConfig) {
       if (!allowed) {
         await auditLogRateLimit(userId, username, retryAfter!);
         await ctx.reply(
-          `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+          `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
         );
         return false;
       }
@@ -197,9 +197,9 @@ export async function handleProcessingError(
     // Only show "Query stopped" if it was an explicit stop, not an interrupt from a new message
     const wasInterrupt = session.consumeInterruptFlag();
     if (!wasInterrupt) {
-      await ctx.reply("🛑 Query stopped.");
+      await ctx.reply("🛑 Opdracht gestopt.");
     }
   } else {
-    await ctx.reply(`❌ Error: ${errorStr.slice(0, 200)}`);
+    await ctx.reply(`❌ Fout: ${errorStr.slice(0, 200)}`);
   }
 }

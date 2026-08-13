@@ -30,7 +30,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply("Geen toegang. Neem contact op met de eigenaar van de bot.");
     return;
   }
 
@@ -47,7 +47,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
   if (!allowed) {
     await auditLogRateLimit(userId, username, retryAfter!);
     await ctx.reply(
-      `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
     );
     return;
   }
@@ -74,7 +74,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
     await Bun.write(voicePath, buffer);
 
     // 7. Transcribe
-    const statusMsg = await ctx.reply("🎤 Transcribing...");
+    const statusMsg = await ctx.reply("🎤 Transcriberen...");
 
     const transcript = await transcribeVoice(voicePath);
     if (!transcript) {
@@ -129,10 +129,10 @@ export async function handleVoice(ctx: Context): Promise<void> {
       // Only show "Query stopped" if it was an explicit stop, not an interrupt from a new message
       const wasInterrupt = session.consumeInterruptFlag();
       if (!wasInterrupt) {
-        await ctx.reply("🛑 Query stopped.");
+        await ctx.reply("🛑 Opdracht gestopt.");
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply(`❌ Fout: ${String(error).slice(0, 200)}`);
     }
   } finally {
     stopProcessing();

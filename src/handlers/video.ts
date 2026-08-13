@@ -57,7 +57,7 @@ export async function handleVideo(ctx: Context): Promise<void> {
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized. Contact the bot owner for access.");
+    await ctx.reply("Geen toegang. Neem contact op met de eigenaar van de bot.");
     return;
   }
 
@@ -74,7 +74,7 @@ export async function handleVideo(ctx: Context): Promise<void> {
   if (!allowed) {
     await auditLogRateLimit(userId, username, retryAfter!);
     await ctx.reply(
-      `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      `⏳ Te veel verzoeken. Wacht ${retryAfter!.toFixed(1)} seconden.`
     );
     return;
   }
@@ -83,7 +83,7 @@ export async function handleVideo(ctx: Context): Promise<void> {
 
   // 4. Download video
   let videoPath: string;
-  const statusMsg = await ctx.reply("📹 Downloading video...");
+  const statusMsg = await ctx.reply("📹 Video downloaden...");
 
   try {
     videoPath = await downloadVideo(ctx);

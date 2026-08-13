@@ -10,7 +10,7 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import type { Context } from "grammy";
 import {
   MCP_SERVERS,
@@ -18,6 +18,7 @@ import {
   STREAMING_THROTTLE_MS,
   THINKING_DEEP_KEYWORDS,
   THINKING_KEYWORDS,
+  TRANSCRIPT_DIR,
   WORKING_DIR,
 } from "./config";
 import { formatToolStatus } from "./formatting";
@@ -500,7 +501,7 @@ class ClaudeSession {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
-        title: this.conversationTitle || "Sessione senza titolo",
+        title: this.conversationTitle || "Sessie zonder titel",
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -561,13 +562,13 @@ class ClaudeSession {
     const sessionData = history.sessions.find((s) => s.session_id === sessionId);
 
     if (!sessionData) {
-      return [false, "Sessione non trovata"];
+      return [false, "Sessie niet gevonden"];
     }
 
     if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
       return [
         false,
-        `Sessione per directory diversa: ${sessionData.working_dir}`,
+        `Sessie hoort bij een andere werkmap: ${sessionData.working_dir}`,
       ];
     }
 
@@ -581,8 +582,54 @@ class ClaudeSession {
 
     return [
       true,
-      `Ripresa sessione: "${sessionData.title}"`,
+      `Sessie hervat: "${sessionData.title}"`,
     ];
+  }
+
+  /**
+   * Whether the CLI still has a transcript for this session.
+   *
+   * The session file records the id; the conversation itself lives in the CLI's
+   * own directory. Resuming an id whose transcript is gone fails hard with
+   * "No conversation found with session ID", so check before offering it.
+   */
+  private hasTranscript(sessionId: string): boolean {
+    try {
+      return statSync(`${TRANSCRIPT_DIR}/${sessionId}.jsonl`).size > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Pick up the most recent conversation at startup.
+   *
+   * A redeploy restarts the process, and without this every deploy would drop
+   * the user into an empty session unless they remembered to call /resume. One
+   * long-running conversation is the intended shape here; the CLI compacts it
+   * when the context fills.
+   *
+   * Silent by design: a fresh volume has nothing to restore, and that is normal
+   * rather than an error worth reporting to the chat.
+   */
+  restoreLastSession(): void {
+    const [candidate] = this.getSessionList();
+    if (!candidate) {
+      return;
+    }
+
+    if (!this.hasTranscript(candidate.session_id)) {
+      console.log(
+        `Not restoring ${candidate.session_id.slice(0, 8)}...: no transcript in ${TRANSCRIPT_DIR}`
+      );
+      return;
+    }
+
+    this.sessionId = candidate.session_id;
+    this.conversationTitle = candidate.title;
+    console.log(
+      `Restored session ${candidate.session_id.slice(0, 8)}... - "${candidate.title}"`
+    );
   }
 
   /**
@@ -591,7 +638,7 @@ class ClaudeSession {
   resumeLast(): [success: boolean, message: string] {
     const sessions = this.getSessionList();
     if (sessions.length === 0) {
-      return [false, "Nessuna sessione salvata"];
+      return [false, "Geen opgeslagen sessies"];
     }
 
     return this.resumeSession(sessions[0]!.session_id);

@@ -28,7 +28,7 @@ A Telegram bot (~4,400 lines of TypeScript in `src/`) that lets you drive a Clau
 | `agent/` | `/app/agent` | the agent's CLAUDE.md and skills, copied in at build time |
 | — | `/app/agent/data` | volume: session file, audit log, downloads, `memory/` |
 
-`/app/agent/data` is bind-mounted from the host and is the only thing that survives a redeploy. The agent's memory lives in `/app/agent/data/memory`.
+`/app/agent/data` is bind-mounted from the host and is the only thing that survives a redeploy. It also holds `CLAUDE_CONFIG_DIR`, so the CLI's conversation transcripts and its memory directory are on the volume too.
 
 ### Message Flow
 

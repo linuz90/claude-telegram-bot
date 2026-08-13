@@ -28,7 +28,7 @@ export async function handleCallback(ctx: Context): Promise<void> {
 
   // 1. Authorization check
   if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.answerCallbackQuery({ text: "Unauthorized" });
+    await ctx.answerCallbackQuery({ text: "Geen toegang" });
     return;
   }
 
@@ -46,7 +46,7 @@ export async function handleCallback(ctx: Context): Promise<void> {
 
   const parts = callbackData.split(":");
   if (parts.length !== 3) {
-    await ctx.answerCallbackQuery({ text: "Invalid callback data" });
+    await ctx.answerCallbackQuery({ text: "Ongeldige callbackgegevens" });
     return;
   }
 
@@ -67,13 +67,13 @@ export async function handleCallback(ctx: Context): Promise<void> {
     requestData = JSON.parse(text);
   } catch (error) {
     console.error(`Failed to load ask-user request ${requestId}:`, error);
-    await ctx.answerCallbackQuery({ text: "Request expired or invalid" });
+    await ctx.answerCallbackQuery({ text: "Verzoek verlopen of ongeldig" });
     return;
   }
 
   // 4. Get selected option
   if (optionIndex < 0 || optionIndex >= requestData.options.length) {
-    await ctx.answerCallbackQuery({ text: "Invalid option" });
+    await ctx.answerCallbackQuery({ text: "Ongeldige keuze" });
     return;
   }
 
@@ -142,10 +142,10 @@ export async function handleCallback(ctx: Context): Promise<void> {
       // Only show "Query stopped" if it was an explicit stop, not an interrupt from a new message
       const wasInterrupt = session.consumeInterruptFlag();
       if (!wasInterrupt) {
-        await ctx.reply("🛑 Query stopped.");
+        await ctx.reply("🛑 Opdracht gestopt.");
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply(`❌ Fout: ${String(error).slice(0, 200)}`);
     }
   } finally {
     typing.stop();
@@ -165,13 +165,13 @@ async function handleResumeCallback(
   const sessionId = callbackData.replace("resume:", "");
 
   if (!sessionId || !userId || !chatId) {
-    await ctx.answerCallbackQuery({ text: "ID sessione non valido" });
+    await ctx.answerCallbackQuery({ text: "Ongeldig sessie-ID" });
     return;
   }
 
   // Check if session is already active
   if (session.isActive) {
-    await ctx.answerCallbackQuery({ text: "Sessione già attiva" });
+    await ctx.answerCallbackQuery({ text: "Er is al een sessie actief" });
     return;
   }
 
@@ -189,7 +189,7 @@ async function handleResumeCallback(
   } catch (error) {
     console.debug("Failed to edit resume message:", error);
   }
-  await ctx.answerCallbackQuery({ text: "Sessione ripresa!" });
+  await ctx.answerCallbackQuery({ text: "Sessie hervat" });
 
   // Send a hidden recap prompt to Claude
   const recapPrompt =

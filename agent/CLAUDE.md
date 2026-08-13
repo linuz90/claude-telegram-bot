@@ -17,8 +17,10 @@ agent/
 
 ## Memory
 
-Persistent notes go in `/app/agent/data/memory`. That directory is mounted from the host,
-so it survives a redeploy.
+Use Claude Code's own memory tools. They write to
+`/app/agent/data/claude/projects/-app-agent/memory`, which is on the mounted
+volume and survives a redeploy — the system prompt already points there, so
+there is nothing to configure and nothing to override.
 
 Everything else, including this file, is replaced by the new image on every
 deploy. Writing anywhere else in `/app/agent` is a way to lose work.

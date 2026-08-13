@@ -34,6 +34,12 @@ COPY . .
 ENV CLAUDE_WORKING_DIR=/app/agent
 ENV STATE_DIR=/app/agent/data
 
+# The CLI's own state, transcripts included. Without this it defaults to
+# $HOME/.claude, which is a container layer: every rebuild would destroy every
+# conversation while the session file kept pointing at them, and /resume would
+# fail with "No conversation found with session ID".
+ENV CLAUDE_CONFIG_DIR=/app/agent/data/claude
+
 # Only the writable paths are chowned. A recursive chown over all of /app would
 # rewrite every file into a new layer - 178MB for a metadata change.
 RUN mkdir -p /app/agent/data && chown -R bun:bun /app/agent

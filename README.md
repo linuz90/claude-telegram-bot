@@ -23,8 +23,9 @@ supported way to run it.
 - **Documents** — PDFs (via `pdftotext`), text files, ZIP/TAR archives
 - **Audio** — mp3, m4a, ogg, wav and friends, transcribed via OpenAI
 - **Video** — video messages and video notes
-- **Session persistence** — conversations continue across messages, and survive
-  restarts via `/resume`
+- **One continuing conversation** — the last session is picked up automatically
+  on startup, so a redeploy does not reset the thread. Claude Code compacts it
+  when the context fills. `/resume` reaches older sessions, `/new` starts over
 - **Message queuing** — send more while Claude works and they queue up. Prefix
   with `!` or use `/stop` to interrupt instead
 - **Extended thinking** — triggered by keywords like "think" (configurable via
@@ -61,14 +62,20 @@ Send `/newbot` to [@BotFather](https://t.me/BotFather) and copy the token. Then
 send `/setcommands` and paste:
 
 ```
-start - Show status and user ID
-new - Start a fresh session
-resume - Pick from recent sessions to resume
-stop - Interrupt current query
-status - Check what Claude is doing
-retry - Re-run the last message
-restart - Restart the bot
+start - Status en je gebruikers-ID tonen
+new - Nieuwe sessie starten
+resume - Een recente sessie hervatten
+stop - Lopende opdracht onderbreken
+status - Kijken waar Claude mee bezig is
+retry - Laatste bericht opnieuw sturen
+restart - Bot herstarten
 ```
+
+**The bot talks Dutch.** Everything it sends to the chat — command replies,
+status, errors, the resume list — is Dutch, and so are the defaults for
+`THINKING_KEYWORDS`. The code, the comments and this documentation are English.
+Translating the bot means the string literals in `src/handlers/` and the five
+session strings in `src/session.ts`; there is no message catalogue to swap.
 
 ### 2. Required environment
 
@@ -93,13 +100,17 @@ Overriding them in `.env` breaks the assumptions the Dockerfile makes.
 agent/                 → /app/agent, the agent's working directory
 ├── CLAUDE.md          the agent's instructions       (image)
 ├── .claude/skills/    skills, auto-triggered         (image)
-└── data/              memory, session, audit log     (bind mount)
+├── .claude/settings.json  permission rules           (image)
+└── data/              everything that survives       (bind mount)
+    ├── claude/        CLAUDE_CONFIG_DIR: transcripts and the agent's memory
+    ├── telegram-bot/  downloads
+    └── *.log, *.json  audit log, session pointer
 ```
 
 `agent/` is copied into the image at build time, so `CLAUDE.md` and the skills
 are versioned with the code: change them, rebuild, redeploy. `data/` is mounted
-over from the host and is the only part that survives a deploy — the agent's
-persistent notes belong in `data/memory`.
+over from the host and is the only part that survives a deploy. The agent's
+memory and its conversation transcripts are both inside it, under `data/claude/`.
 
 Everything the agent touches is therefore under one directory, which is why the
 SDK needs no `additionalDirectories` and there is no path allowlist to maintain.
@@ -288,7 +299,7 @@ credit.
 found none. A stdio server also needs its binary in the image.
 
 **The agent forgets everything after a deploy** — it wrote outside
-`/app/agent/data/memory`. Only that path is mounted.
+`/app/agent/data`. Only that path is mounted, and the memory tools already write inside it.
 
 **The agent ignores its instructions** — they have to be in `agent/`, which is
 copied to `/app/agent`. A `CLAUDE.md` elsewhere in the repository is not read:
