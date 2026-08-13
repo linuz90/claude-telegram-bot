@@ -38,20 +38,37 @@ strips it before resolving and puts it back afterwards.
 ## Deviations from Kimi's guide
 
 [Use Kimi in Claude Code](https://platform.kimi.ai/docs/guide/claude-code-kimi)
-is the source for this setup. Four of its recommendations are not followed.
-Verified by reading the CLI that the SDK bundles
-(`node_modules/@anthropic-ai/claude-agent-sdk/cli.js`, **v0.1.76**) — recheck
-after an SDK upgrade.
+is the source for this setup. One of its recommendations is not followed.
 
 | Guide says | Here | Why |
 |---|---|---|
 | set `CLAUDE_CODE_SUBAGENT_MODEL` | unset, and deleted from the child env | It short-circuits subagent model resolution before anything else, including a subagent that asks for a tier by name. With all tiers on one model the effect is identical; with a cheaper haiku tier it is not. |
-| set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | skipped | The string does not occur in `cli.js`. No-op in this version. |
-| set `ANTHROPIC_DEFAULT_FABLE_MODEL` | skipped | Same: not present in `cli.js`. The other three tier variables are. |
-| `CLAUDE_CODE_EFFORT_LEVEL="max"` | `high` | The parser takes an integer or `low`/`medium`/`high`. Anything else fails validation and falls through to the default, so `"max"` silently means "unset". |
 
 `ANTHROPIC_MODEL` from the guide is not needed either: the SDK passes
 `options.model` to the CLI as `--model`, which covers the same slot.
+
+`CLAUDE_CODE_EFFORT_LEVEL` is not set either, but for a different reason: effort
+is an SDK option now (`options.effort` in `src/session.ts`), so the environment
+variable is the older of two routes to the same setting.
+
+### Verifying this against the CLI
+
+The three remaining guide recommendations —
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `ANTHROPIC_DEFAULT_FABLE_MODEL` and an
+effort level of `max` — were all no-ops on SDK v0.1.76 and all work as of
+**v0.3.229** (CLI 2.1.223). Recheck after an upgrade; the CLI is versioned
+separately from the SDK wrapper and neither changelog covers this.
+
+There is no `cli.js` to read any more. Since v0.3 the CLI ships as a native
+binary in a per-platform package, so grep the binary instead:
+
+```bash
+strings -a node_modules/@anthropic-ai/claude-agent-sdk-*/claude \
+  | grep -c CLAUDE_CODE_AUTO_COMPACT_WINDOW
+```
+
+`node_modules/@anthropic-ai/claude-agent-sdk/manifest.json` gives the CLI
+version and build date behind a given SDK release.
 
 ## Models and thinking
 

@@ -25,7 +25,11 @@ import {
   checkPendingAskUserRequests,
   checkPendingSendFileRequests,
 } from "./handlers/streaming";
-import { BOT_MODEL_MAIN, buildProviderEnv } from "./provider";
+import {
+  BOT_EFFORT_LEVEL,
+  BOT_MODEL_MAIN,
+  buildProviderEnv,
+} from "./provider";
 import type {
   SavedSession,
   SessionHistory,
@@ -217,7 +221,16 @@ class ClaudeSession {
       // tools. Use `append` to add to it instead.
       systemPrompt: { type: "preset", preset: "claude_code" },
       mcpServers: MCP_SERVERS,
-      maxThinkingTokens: thinkingTokens,
+      // A fixed budget rather than `{ type: "adaptive" }`: thinking here is
+      // keyword-driven, so the caller has already decided. Adaptive would hand
+      // that decision back to the model and make the keywords meaningless.
+      thinking:
+        thinkingTokens === 0
+          ? { type: "disabled" }
+          : { type: "enabled", budgetTokens: thinkingTokens },
+      // Reasoning effort. Passed as an option rather than through
+      // CLAUDE_CODE_EFFORT_LEVEL in the child env, which is the older route.
+      effort: BOT_EFFORT_LEVEL,
       // No `additionalDirectories`: STATE_DIR sits inside WORKING_DIR, so
       // everything the agent touches is already under its cwd.
       resume: this.sessionId || undefined,

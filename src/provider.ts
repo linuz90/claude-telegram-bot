@@ -12,6 +12,8 @@
  * included.
  */
 
+import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
+
 // ============== Endpoint ==============
 
 export const PROVIDER_BASE_URL =
@@ -53,10 +55,27 @@ export const BOT_MODEL_MAIN = process.env.BOT_MODEL_MAIN || "sonnet";
 
 // ============== Reasoning ==============
 
-// Kimi recommends the highest reasoning effort for k3. Their guide says "max",
-// which this SDK version does not accept: it takes an integer or one of
-// low/medium/high, and anything else falls through to the default.
-const EFFORT_LEVEL = process.env.BOT_EFFORT_LEVEL || "high";
+// Kimi recommends the highest reasoning effort for k3. Passed to the SDK as
+// `options.effort` in src/session.ts, not through the child environment.
+//
+// Anything outside this set is rejected at startup rather than silently falling
+// back: a typo here costs reasoning quality on every message and is invisible
+// otherwise.
+const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+
+function parseEffortLevel(): EffortLevel {
+  const raw = (process.env.BOT_EFFORT_LEVEL || "high").trim().toLowerCase();
+  if (!EFFORT_LEVELS.includes(raw as EffortLevel)) {
+    throw new Error(
+      `BOT_EFFORT_LEVEL="${raw}" is not valid. Use one of: ${EFFORT_LEVELS.join(
+        ", "
+      )}`
+    );
+  }
+  return raw as EffortLevel;
+}
+
+export const BOT_EFFORT_LEVEL = parseEffortLevel();
 
 // ============== Compatibility escape hatches ==============
 
@@ -116,8 +135,6 @@ export function buildProviderEnv(): Record<string, string> {
   // model. With all three tiers on one model the effect is identical anyway.
   delete env.CLAUDE_CODE_SUBAGENT_MODEL;
 
-  env.CLAUDE_CODE_EFFORT_LEVEL = EFFORT_LEVEL;
-
   if (ADAPTIVE_THINKING_DISABLED) {
     env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING = "1";
   }
@@ -131,7 +148,7 @@ export function buildProviderEnv(): Record<string, string> {
 // ============== Startup Validation ==============
 
 if (PROVIDER_CONFIGURED) {
-  console.log(`Provider: ${PROVIDER_BASE_URL} (effort: ${EFFORT_LEVEL})`);
+  console.log(`Provider: ${PROVIDER_BASE_URL} (effort: ${BOT_EFFORT_LEVEL})`);
   console.log(
     `Models: main=${BOT_MODEL_MAIN} opus=${OPUS_MODEL} sonnet=${SONNET_MODEL} haiku=${HAIKU_MODEL}`
   );

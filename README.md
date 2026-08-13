@@ -145,8 +145,8 @@ BOT_MODEL_HAIKU=
 # works, but then skips the tier mapping for the main loop.
 BOT_MODEL_MAIN=sonnet
 
-# Reasoning effort: an integer, or low/medium/high. Kimi's guide says "max",
-# which this SDK version rejects.
+# Reasoning effort: low, medium, high, xhigh or max. An invalid value stops the
+# bot at startup rather than silently falling back.
 BOT_EFFORT_LEVEL=high
 
 # Leave false. Set true only if a model returns a 400 naming the "thinking"
@@ -159,8 +159,8 @@ With no key set, the bot falls back to whatever credentials Claude Code finds
 locally, so a claude.ai login still works for development.
 
 → **[docs/provider.md](docs/provider.md)** covers why the credential goes in
-`ANTHROPIC_AUTH_TOKEN`, how the model tiers resolve, the four places this setup
-deviates from Kimi's guide, and how to switch to another provider.
+`ANTHROPIC_AUTH_TOKEN`, how the model tiers resolve, where this setup deviates
+from Kimi's guide, and how to switch to another provider.
 
 ## Bot commands
 
@@ -194,6 +194,19 @@ not: Docker only reads it from the root of the build context.
 The image deliberately omits `git` — it costs ~150MB once apt pulls in perl, and
 an assistant-style agent never calls it. Add it to `deployment/Dockerfile` if
 your agent works on repositories.
+
+It is still around 950MB, and most of that is one file. Since v0.3 the agent SDK
+ships the Claude Code CLI as a native binary of roughly 290MB, published as a
+per-platform optional dependency. Two consequences worth knowing before you edit
+the install step:
+
+- **Both the glibc and the musl build get installed** for your architecture,
+  because nothing in the package metadata tells bun which libc it is targeting.
+  This image is Debian, so the musl one cannot run at all; the Dockerfile
+  deletes it in the same layer as the install.
+- **The binary is chosen for the platform you build on.** Building on arm64
+  produces an arm64 image. Cross-building with `--platform` for a different
+  architecture pulls the wrong binary, or none.
 
 ### Permissions on the deploy host
 
@@ -294,7 +307,8 @@ targets a container and has had the host-specific code removed — `PATH`
 injection for Homebrew, CLI auto-detection, `$HOME`-based default paths and the
 standalone-build hooks. New here: `src/provider.ts`, `agent/`, `deployment/`,
 and `mcp/` (upstream: `ask_user_mcp/`, `send_file_mcp/`,
-`mcp-config.example.ts`).
+`mcp-config.example.ts`). Also gone: upstream's `bunfig.toml`, which quarantined
+npm releases younger than seven days.
 
 ## License
 

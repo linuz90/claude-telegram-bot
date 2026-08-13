@@ -102,6 +102,12 @@ The two MCP servers hand off through `/tmp/ask-user-*.json` and
 
 **`systemPrompt` must stay a preset object**: a plain string replaces Claude Code's entire system prompt instead of adding to it. Use `{ type: "preset", preset: "claude_code", append: "..." }`.
 
+**The SDK's CLI is a ~290MB native binary**, not the `cli.js` it used to be. Bun
+installs both the glibc and the musl build for the architecture, and the
+Dockerfile deletes the musl one in the same layer as the install. Do not "tidy"
+that away. It also means the image is architecture-specific: it is built for the
+platform you build on.
+
 **`.dockerignore` lives in the repository root**, not in `deployment/` next to the Dockerfile. Docker only reads it from the root of the build context.
 
 **Two gitignored files**: `.env` and `deployment/docker-compose.yml`. Both have a committed `.example` — change it alongside whenever you change what they must contain. `mcp/config.ts` is deliberately *not* a template: one container, one agent, so the server list is part of the build.

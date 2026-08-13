@@ -12,9 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Dependencies first, so they stay cached when only source changes.
-# --production skips typescript and @types/bun: dead weight in a container.
-COPY package.json bun.lock bunfig.toml ./
-RUN bun install --frozen-lockfile --production
+# --production skips @types/bun. typescript comes in anyway as a peer dependency.
+#
+# Since v0.3 the agent SDK ships the Claude Code CLI as a ~290MB native binary
+# per platform, and bun installs both the glibc and the musl build for this
+# architecture because nothing in the package metadata distinguishes them. This
+# base image is Debian, so the musl one cannot even be executed - dropping it in
+# the same layer halves the image.
+#
+# bun's download cache is written to $HOME and would otherwise be baked into
+# this layer at roughly the size of node_modules again.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production \
+    && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-*-musl \
+    && rm -rf /root/.bun/install/cache
 
 COPY . .
 
