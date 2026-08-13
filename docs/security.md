@@ -38,11 +38,46 @@ permission callback entirely. Wiring one up looks like protection and is not.
 
 ## Tightening
 
-Three mechanisms actually work. Pick by how much you trust the agent.
+Four mechanisms actually work. Pick by how much you trust the agent.
 
-### 1. `disallowedTools`
+### 1. `permissions.deny` in `agent/.claude/settings.json`
 
-The bluntest and most reliable. Add it to the options in `src/session.ts`:
+Usually the right one, and the only one that lives with the agent instead of
+with the template's code:
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Bash(notion page delete *)",
+      "Bash(curl *api.notion.com*)",
+      "WebFetch"
+    ]
+  }
+}
+```
+
+**Deny rules are evaluated before the permission mode is consulted**, so they
+hold under `bypassPermissions`. That is worth stating plainly, because the mode
+name suggests otherwise. In CLI 2.1.229 the tool-call check runs deny-on-tool,
+then deny-on-content, then ask rules, and only reaches the mode as a fallback
+for calls that matched nothing — at which point `bypassPermissions` returns
+`allow`.
+
+Rules from settings and rules from `disallowedTools` end up in the same set,
+tagged with a different source (`projectSettings` versus `cliArg`). They are the
+same mechanism.
+
+This works because `src/session.ts` sets `settingSources: ["user", "project"]`
+and `cwd` is `/app/agent`, so project scope resolves to
+`/app/agent/.claude/settings.json` — which is `agent/.claude/settings.json` in
+the repository. Verify a new rule set actually loads before trusting it; a
+settings file in the wrong place fails silently.
+
+### 2. `disallowedTools`
+
+The same rules, passed from code instead. Add them to the options in
+`src/session.ts`:
 
 ```ts
 const options: Options = {
@@ -51,11 +86,11 @@ const options: Options = {
 };
 ```
 
-Denied tools are removed before the model sees them, so there is nothing to
-argue with. Use this when your agent has a known, narrow toolset — a Notion
-agent that never needs a shell, for example.
+A bare tool name removes the tool before the model sees it, so there is nothing
+to argue with. Prefer settings.json unless the restriction belongs to the
+template rather than to one agent.
 
-### 2. `PreToolUse` hooks
+### 3. `PreToolUse` hooks
 
 For per-call decisions: inspect the arguments and exit 2 to block. Because
 `session.ts` sets `settingSources: ["user", "project"]`, hooks are read from
@@ -69,9 +104,10 @@ Verify this with a hook that logs before relying on one that blocks. A hook in
 the wrong place fails silently, which looks exactly like a hook that decided to
 allow the call.
 
-This is where path or command checking belongs if a use case needs it.
+Use a hook only for what a deny rule cannot express — a decision that depends on
+the argument values rather than on the command shape.
 
-### 3. The container
+### 4. The container
 
 The cheapest real boundary. Mount only what the agent needs, and mount reference
 material read-only:
@@ -90,10 +126,17 @@ deploy.
 
 Restrictions belong to the agent, not the template. A reasonable order:
 
-1. Decide the toolset, then set `disallowedTools` to everything outside it.
+1. Write the deny rules in `agent/.claude/settings.json`. Start with what is
+   irreversible outside the container, and with anything that routes around the
+   tool you sanctioned — a raw `curl` to the same API is the usual hole.
 2. Mount nothing you would not want overwritten.
-3. Add `PreToolUse` hooks only for the cases the first two cannot express.
+3. Add `PreToolUse` hooks only for the cases a deny rule cannot express.
 4. Keep the audit log somewhere you will actually read it.
+
+Deny rules match the command shape, not its meaning. `Bash(notion page delete *)`
+catches the direct form and not `sh -c "notion page delete x"` or
+`true && notion page delete x`. That is a reason to also deny the routes around
+the rule, not a reason to skip the rule.
 
 Nothing on that list is a prompt. Instructing an agent not to do something is
 worth doing, but it is not a control.
