@@ -3,84 +3,62 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-1.0+-black.svg)](https://bun.sh/)
 
-**Turn [Claude Code](https://claude.com/product/claude-code) into your personal assistant, accessible from anywhere via Telegram.**
+Run a Claude Code agent from Telegram. Send text, voice, photos, documents,
+audio and video; see the reply and the tool calls stream back in real time.
 
-Send text, voice, photos, documents, audio, and video. See responses and tools usage in real-time.
+Fork of [linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot),
+with three changes: it runs on **any Anthropic-compatible provider** (Kimi by
+default) instead of a claude.ai subscription, the model is configurable, and it
+deploys as a Docker container instead of a macOS LaunchAgent.
 
-![Demo](assets/demo.gif)
+This is a template. It ships no agent instructions of its own: put a `CLAUDE.md`
+and skills in `agent/`, and that becomes the agent. The container is the only
+supported way to run it.
 
-## Claude Code as a Personal Assistant
+## Features
 
-I've started using Claude Code as a personal assistant, and I've built this bot so I can access it from anywhere.
+- **Text** — questions, instructions, conversation
+- **Voice** — transcribed via OpenAI, then handled as text
+- **Photos** — single images or albums (buffered for 1s to group them)
+- **Documents** — PDFs (via `pdftotext`), text files, ZIP/TAR archives
+- **Audio** — mp3, m4a, ogg, wav and friends, transcribed via OpenAI
+- **Video** — video messages and video notes
+- **Session persistence** — conversations continue across messages, and survive
+  restarts via `/resume`
+- **Message queuing** — send more while Claude works and they queue up. Prefix
+  with `!` or use `/stop` to interrupt instead
+- **Extended thinking** — triggered by keywords like "think" (configurable via
+  `THINKING_KEYWORDS`); the reasoning streams to the chat
+- **Interactive buttons** — the `ask_user` MCP server turns options into tappable
+  inline buttons
+- **File delivery** — the `send_file` MCP server sends files back to the chat
 
-In fact, while Claude Code is described as a powerful AI **coding agent**, it's actually a very capable **general-purpose agent** too when given the right instructions, context, and tools.
-
-To achieve this, I set up a folder with a CLAUDE.md that teaches Claude about me (my preferences, where my notes live, my workflows), has a set of tools and scripts based on my needs, and pointed this bot at that folder.
-
-→ **[📄 See the Personal Assistant Guide](docs/personal-assistant-guide.md)** for detailed setup and examples.
-
-## Bot Features
-
-- 💬 **Text**: Ask questions, give instructions, have conversations
-- 🎤 **Voice**: Speak naturally - transcribed via OpenAI and processed by Claude
-- 📸 **Photos**: Send screenshots, documents, or anything visual for analysis
-- 📄 **Documents**: PDFs, text files, and archives (ZIP, TAR) are extracted and analyzed
-- 🎵 **Audio**: Audio files (mp3, m4a, ogg, wav, etc.) are transcribed via OpenAI and processed
-- 🎬 **Video**: Video messages and video notes are processed by Claude
-- 🔄 **Session persistence**: Conversations continue across messages
-- 📨 **Message queuing**: Send multiple messages while Claude works - they queue up automatically. Prefix with `!` or use `/stop` to interrupt and send immediately
-- 🧠 **Extended thinking**: Trigger Claude's reasoning by using words like "think" or "reason" - you'll see its thought process as it works (configurable via `THINKING_TRIGGER_KEYWORDS`)
-- 🔘 **Interactive buttons**: Claude can present options as tappable inline buttons via the built-in `ask_user` MCP tool
-- 📎 **File delivery**: Claude can send files (images, videos, audio, documents) back to the chat via the `send_file` MCP tool
-
-## Quick Start
+## Quick start
 
 ```bash
-git clone https://github.com/linuz90/claude-telegram-bot?tab=readme-ov-file
-cd claude-telegram-bot-ts
-
 cp .env.example .env
-# Edit .env with your credentials
+# Fill in TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS and KIMI_API_KEY
 
-bun install
-bun run src/index.ts
+cp deployment/docker-compose.example.yml deployment/docker-compose.yml
+
+docker compose -f deployment/docker-compose.yml up -d --build
+docker compose -f deployment/docker-compose.yml logs -f
 ```
 
-### Prerequisites
+Prerequisites: Docker, a bot token from [@BotFather](https://t.me/BotFather),
+and a provider key. Everything else, `pdftotext` and `unzip` included, is in the
+image.
 
-- **Bun 1.0+** - [Install Bun](https://bun.sh/)
-- **Claude Agent SDK** - `@anthropic-ai/claude-agent-sdk` (installed via bun install)
-- **Telegram Bot Token** from [@BotFather](https://t.me/BotFather)
-- **OpenAI API Key** (optional, for voice transcription)
-
-### Claude Authentication
-
-The bot uses the `@anthropic-ai/claude-agent-sdk` which supports two authentication methods:
-
-| Method                     | Best For                                | Setup                             |
-| -------------------------- | --------------------------------------- | --------------------------------- |
-| **CLI Auth** (recommended) | High usage, cost-effective              | Run `claude` once to authenticate |
-| **API Key**                | CI/CD, environments without Claude Code | Set `ANTHROPIC_API_KEY` in `.env` |
-
-**CLI Auth** (recommended): The SDK automatically uses your Claude Code login. Just ensure you've run `claude` at least once and authenticated. This uses your Claude Code subscription which is much more cost-effective for heavy usage.
-
-**API Key**: For environments where Claude Code isn't installed. Get a key from [console.anthropic.com](https://console.anthropic.com/) and add to `.env`:
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-api03-...
-```
-
-Note: API usage is billed per token and can get expensive quickly for heavy use.
+On a Linux host, read [Permissions on the deploy
+host](#permissions-on-the-deploy-host) first — the container writes as a fixed
+uid and will silently fail to write anything otherwise.
 
 ## Configuration
 
-### 1. Create Your Bot
+### 1. Create the bot
 
-1. Open [@BotFather](https://t.me/BotFather) on Telegram
-2. Send `/newbot` and follow the prompts to create your bot
-3. Copy the token (looks like `1234567890:ABC-DEF...`)
-
-Then send `/setcommands` to BotFather and paste this:
+Send `/newbot` to [@BotFather](https://t.me/BotFather) and copy the token. Then
+send `/setcommands` and paste:
 
 ```
 start - Show status and user ID
@@ -88,152 +66,236 @@ new - Start a fresh session
 resume - Pick from recent sessions to resume
 stop - Interrupt current query
 status - Check what Claude is doing
+retry - Re-run the last message
 restart - Restart the bot
 ```
 
-### 2. Configure Environment
-
-Create `.env` with your settings:
+### 2. Required environment
 
 ```bash
-# Required
 TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF...   # From @BotFather
 TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
-
-# Recommended
-CLAUDE_WORKING_DIR=/path/to/your/folder    # Where Claude runs (loads CLAUDE.md, skills, MCP)
-OPENAI_API_KEY=sk-...                      # For voice transcription
+KIMI_API_KEY=sk-...                        # Or ANTHROPIC_AUTH_TOKEN
 ```
 
-**Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram.
+Find your user ID by messaging [@userinfobot](https://t.me/userinfobot).
 
-**File access paths:** By default, Claude can access:
+`OPENAI_API_KEY` is the only other one worth setting; without it voice and audio
+are rejected. The rest of `.env.example` is optional tuning.
 
-- `CLAUDE_WORKING_DIR` (or home directory if not set)
-- `~/Documents`, `~/Downloads`, `~/Desktop`
-- `~/.claude` (for Claude Code plans and settings)
+The container's paths are **not** environment config. `CLAUDE_WORKING_DIR` and
+`STATE_DIR` are set in `deployment/Dockerfile` and are part of the image layout.
+Overriding them in `.env` breaks the assumptions the Dockerfile makes.
 
-To customize, set `ALLOWED_PATHS` in `.env` (comma-separated). Note: this **overrides** all defaults, so include `~/.claude` if you want plan mode to work:
+### 3. The agent
+
+```
+agent/                 → /app/agent, the agent's working directory
+├── CLAUDE.md          the agent's instructions       (image)
+├── .claude/skills/    skills, auto-triggered         (image)
+└── data/              memory, session, audit log     (bind mount)
+```
+
+`agent/` is copied into the image at build time, so `CLAUDE.md` and the skills
+are versioned with the code: change them, rebuild, redeploy. `data/` is mounted
+over from the host and is the only part that survives a deploy — the agent's
+persistent notes belong in `data/memory`.
+
+Everything the agent touches is therefore under one directory, which is why the
+SDK needs no `additionalDirectories` and there is no path allowlist to maintain.
+
+### 4. MCP servers
+
+`mcp/config.ts` is committed, not a template: one container, one agent, so the
+server list is part of the build. Two servers ship with the repo and are enabled
+by default:
+
+| Server | Tool | What it does |
+|---|---|---|
+| `mcp/ask-user` | `ask_user(question, options)` | Renders the options as tappable inline buttons. The tap becomes the user's next message. |
+| `mcp/send-file` | `send_file(file_path, caption?)` | Sends a file to the chat, picking photo/video/audio/document from the extension. Fire-and-forget, 50MB Telegram limit. |
+
+They have dedicated support in the bot: `src/handlers/callback.ts` renders and
+answers the buttons, `src/handlers/streaming.ts` picks up both handoffs, and
+`src/session.ts` suppresses their tool-status lines so they read as UI rather
+than tool calls. Both hand off through short-lived JSON files in `/tmp`, which is
+deliberate — a handshake, not state worth persisting.
+
+Add the agent's own servers to `mcp/config.ts`. A stdio server needs its binary
+in the image, so add it to `deployment/Dockerfile` too.
+
+## Provider setup
+
+Every provider setting has a working default, so `KIMI_API_KEY` is the only one
+you have to touch. The rest, with their defaults:
 
 ```bash
-ALLOWED_PATHS=/your/project,/other/path,~/.claude
+# Endpoint. Override this together with the model variables to point at another
+# Anthropic-compatible provider, OpenRouter included.
+ANTHROPIC_BASE_URL=https://api.moonshot.ai/anthropic
+
+# The three tiers. "[1m]" selects the 1M context window. opus and haiku fall
+# back to sonnet; point haiku at kimi-k2.6 if the internal small/fast calls are
+# not worth k3.
+BOT_MODEL_SONNET=kimi-k3[1m]
+BOT_MODEL_OPUS=
+BOT_MODEL_HAIKU=
+
+# Which tier this session runs on: opus, sonnet or haiku. A raw model name also
+# works, but then skips the tier mapping for the main loop.
+BOT_MODEL_MAIN=sonnet
+
+# Reasoning effort: an integer, or low/medium/high. Kimi's guide says "max",
+# which this SDK version rejects.
+BOT_EFFORT_LEVEL=high
+
+# Leave false. Set true only if a model returns a 400 naming the "thinking"
+# field or another unrecognised request field.
+BOT_DISABLE_ADAPTIVE_THINKING=false
+BOT_DISABLE_EXPERIMENTAL_BETAS=false
 ```
 
-### 3. Configure MCP Servers (Optional)
+With no key set, the bot falls back to whatever credentials Claude Code finds
+locally, so a claude.ai login still works for development.
 
-Copy and edit the MCP config:
+→ **[docs/provider.md](docs/provider.md)** covers why the credential goes in
+`ANTHROPIC_AUTH_TOKEN`, how the model tiers resolve, the four places this setup
+deviates from Kimi's guide, and how to switch to another provider.
+
+## Bot commands
+
+| Command | Description |
+|---|---|
+| `/start` | Show status and your user ID |
+| `/new` | Start a fresh session |
+| `/resume` | Pick from the last 5 sessions to resume, with a recap |
+| `/stop` | Interrupt the current query |
+| `/status` | Check what Claude is doing |
+| `/retry` | Re-run the last message |
+| `/restart` | Restart the bot |
+
+## Deployment
+
+Everything Docker-related lives in `deployment/`. `docker-compose.yml` is
+gitignored, like `.env`, because the mount path and uid differ per host. Two
+paths matter:
+
+- **`/app/agent/data`** is bind-mounted from the host and holds the session file, audit
+  log, Telegram downloads and the agent's memory. It is the only thing that
+  survives a redeploy. Set `STATE_PATH` in `.env` to a directory outside the
+  repository on a real host; it defaults to `./data` for local runs.
+- **`/app/agent` is deliberately not mounted.** Instructions and skills come
+  from `agent/` and are baked into the image, so a push rebuilds and ships them.
+  Mounting over `/app/agent` would hide them.
+
+`.dockerignore` stays in the repository root even though the Dockerfile does
+not: Docker only reads it from the root of the build context.
+
+The image deliberately omits `git` — it costs ~150MB once apt pulls in perl, and
+an assistant-style agent never calls it. Add it to `deployment/Dockerfile` if
+your agent works on repositories.
+
+### Permissions on the deploy host
+
+The container writes to `/app/agent/data` as a specific uid. A bind mount keeps the host's
+ownership, so if that uid cannot write to the host directory, every write fails
+with `EACCES`: no audit log, no saved session, and an agent that cannot remember
+anything. The bot still starts, which makes this easy to miss.
+
+Docker Desktop on macOS papers over the mismatch. On a Linux host it does not.
+Two things prevent it:
 
 ```bash
-cp mcp-config.ts mcp-config.local.ts
-# Edit mcp-config.local.ts with your MCP servers
+# 1. Create the directory yourself. If Docker creates a missing bind-mount
+#    source, it does so as root, and the container cannot write to it.
+mkdir -p /srv/claude-telegram/data
+
+# 2. Tell the container which uid to run as.
+echo "STATE_PATH=/srv/claude-telegram/data" >> .env
+echo "HOST_UID=$(id -u)" >> .env
+echo "HOST_GID=$(id -g)" >> .env
 ```
 
-The bot includes two built-in MCP servers:
-- **`ask_user`** — Lets Claude present options as tappable inline keyboard buttons
-- **`send_file`** — Lets Claude send files (images, videos, audio, documents) back to the chat
-
-Add your own MCP servers (Things, Notion, Typefully, etc.) to give Claude access to your tools.
-
-## Bot Commands
-
-| Command    | Description                       |
-| ---------- | --------------------------------- |
-| `/start`   | Show status and your user ID      |
-| `/new`     | Start a fresh session             |
-| `/resume`  | Pick from last 5 sessions to resume (with recap) |
-| `/stop`    | Interrupt current query           |
-| `/status`  | Check what Claude is doing        |
-| `/restart` | Restart the bot                   |
-
-## Running as a Service (macOS)
-
-```bash
-cp launchagent/com.claude-telegram-ts.plist.template ~/Library/LaunchAgents/com.claude-telegram-ts.plist
-# Edit the plist with your paths and env vars
-launchctl load ~/Library/LaunchAgents/com.claude-telegram-ts.plist
-```
-
-The bot will start automatically on login and restart if it crashes.
-
-**Prevent sleep:** To keep the bot running when your Mac is idle, go to **System Settings → Battery → Options** and enable **"Prevent automatic sleeping when the display is off"** (when on power adapter).
-
-**Logs:**
-
-```bash
-tail -f /tmp/claude-telegram-bot-ts.log   # stdout
-tail -f /tmp/claude-telegram-bot-ts.err   # stderr
-```
-
-**Shell aliases:** If running as a service, these aliases make it easy to manage the bot (add to `~/.zshrc` or `~/.bashrc`):
-
-```bash
-alias cbot='launchctl list | grep com.claude-telegram-ts'
-alias cbot-stop='launchctl bootout gui/$(id -u)/com.claude-telegram-ts 2>/dev/null && echo "Stopped"'
-alias cbot-start='launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude-telegram-ts.plist 2>/dev/null && echo "Started"'
-alias cbot-restart='launchctl kickstart -k gui/$(id -u)/com.claude-telegram-ts && echo "Restarted"'
-alias cbot-logs='tail -f /tmp/claude-telegram-bot-ts.log'
-```
+`user:` in the compose file reads those two, defaulting to `1000:1000`. Both
+steps belong in your deploy script, not in a runbook someone has to remember.
 
 ## Development
 
+Type checking runs on the host; everything else runs in the container.
+
 ```bash
-# Run with auto-reload
-bun --watch run src/index.ts
-
-# Type check
-bun run typecheck
-
-# Or directly
-bun run --bun tsc --noEmit
+bun install        # Only for the type checker's dependencies
+bun run typecheck  # tsc --noEmit
 ```
+
+To try a code change, rebuild:
+
+```bash
+docker compose -f deployment/docker-compose.yml up -d --build
+```
+
+Running the bot outside the container is not supported. The paths it expects
+(`/app/agent`, `/app/agent/data`) are the image's layout, and `pdftotext` and `unzip` are
+installed there rather than on your machine.
 
 ## Security
 
-> **⚠️ Important:** This bot runs Claude Code with **all permission prompts bypassed**. Claude can read, write, and execute commands without confirmation within the allowed paths. This is intentional for a seamless mobile experience, but you should understand the implications before deploying.
+> **This bot runs Claude Code with all permission prompts bypassed.** Whoever can
+> send it a Telegram message can make it read, write and execute anything the
+> process can reach. The allowlist is the perimeter.
 
-**→ [Read the full Security Model](SECURITY.md)** for details on how permissions work and what protections are in place.
+Enforced in code: the user allowlist, rate limiting, the audit log, and the
+container boundary. Inside the container nothing constrains the agent — the
+template ships no path allowlist and no command filter, because a half-wired one
+reads like protection and is not.
 
-Multiple layers protect against misuse:
-
-1. **User allowlist** - Only your Telegram IDs can use the bot
-2. **Intent classification** - AI filter blocks dangerous requests
-3. **Path validation** - File access restricted to `ALLOWED_PATHS`
-4. **Command safety** - Destructive patterns like `rm -rf /` are blocked
-5. **Rate limiting** - Prevents runaway usage
-6. **Audit logging** - All interactions logged to `/tmp/claude-telegram-audit.log`
+→ **[docs/security.md](docs/security.md)** for the full model, including the
+three mechanisms that do work (`disallowedTools`, `PreToolUse` hooks, the
+container) and where to put restrictions when you build an agent on this
+template.
 
 ## Troubleshooting
 
-**Bot doesn't respond**
+Start with the logs: `docker compose -f deployment/docker-compose.yml logs -f`.
 
-- Verify your user ID is in `TELEGRAM_ALLOWED_USERS`
-- Check the bot token is correct
-- Look at logs: `tail -f /tmp/claude-telegram-bot-ts.err`
-- Ensure the bot process is running
+**Bot doesn't respond** — check your user ID is in `TELEGRAM_ALLOWED_USERS` and
+that the container is up.
 
-**Claude authentication issues**
+**401 from the provider** — the key is in the wrong variable. It belongs in
+`KIMI_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, which is sent as
+`Authorization: Bearer`.
 
-- For CLI auth: run `claude` in terminal and verify you're logged in
-- For API key: check `ANTHROPIC_API_KEY` is set and starts with `sk-ant-api03-`
-- Verify the API key has credits at [console.anthropic.com](https://console.anthropic.com/)
+**Model not found** — the endpoint and the model names disagree. Changing
+`ANTHROPIC_BASE_URL` without changing `BOT_MODEL_*` is the usual cause.
 
-**Voice messages fail**
+**Voice or audio fails** — `OPENAI_API_KEY` is missing, invalid, or out of
+credit.
 
-- Ensure `OPENAI_API_KEY` is set in `.env`
-- Verify the key is valid and has credits
+**MCP tools not working** — startup logs how many servers it loaded, or says it
+found none. A stdio server also needs its binary in the image.
 
-**Claude can't access files**
+**The agent forgets everything after a deploy** — it wrote outside
+`/app/agent/data/memory`. Only that path is mounted.
 
-- Check `CLAUDE_WORKING_DIR` points to an existing directory
-- Verify `ALLOWED_PATHS` includes directories you want Claude to access
-- Ensure the bot process has read/write permissions
+**The agent ignores its instructions** — they have to be in `agent/`, which is
+copied to `/app/agent`. A `CLAUDE.md` elsewhere in the repository is not read:
+the SDK resolves it relative to `CLAUDE_WORKING_DIR`, and the code lives in
+`/app`.
 
-**MCP tools not working**
+## Tracking upstream
 
-- Verify `mcp-config.ts` exists and exports properly
-- Check that MCP server dependencies are installed
-- Look for MCP errors in the logs
+```bash
+git fetch upstream
+git merge upstream/main
+```
+
+Expect conflicts. Upstream targets a macOS host with a LaunchAgent; this fork
+targets a container and has had the host-specific code removed — `PATH`
+injection for Homebrew, CLI auto-detection, `$HOME`-based default paths and the
+standalone-build hooks. New here: `src/provider.ts`, `agent/`, `deployment/`,
+and `mcp/` (upstream: `ask_user_mcp/`, `send_file_mcp/`,
+`mcp-config.example.ts`).
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

@@ -13,9 +13,7 @@ import {
 import { readFileSync } from "fs";
 import type { Context } from "grammy";
 import {
-  ALLOWED_PATHS,
   MCP_SERVERS,
-  SAFETY_PROMPT,
   SESSION_FILE,
   STREAMING_THROTTLE_MS,
   THINKING_DEEP_KEYWORDS,
@@ -27,8 +25,7 @@ import {
   checkPendingAskUserRequests,
   checkPendingSendFileRequests,
 } from "./handlers/streaming";
-import { DENY_RULES, createPermissionHooks } from "./permissions";
-import { BOT_MODEL, buildProviderEnv } from "./provider";
+import { BOT_MODEL_MAIN, buildProviderEnv } from "./provider";
 import type {
   SavedSession,
   SessionHistory,
@@ -210,30 +207,28 @@ class ClaudeSession {
 
     // Build SDK V1 options - supports all features
     const options: Options = {
-      model: BOT_MODEL,
+      model: BOT_MODEL_MAIN,
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      systemPrompt: SAFETY_PROMPT,
+      // Keep Claude Code's own system prompt. Passing a string here REPLACES it,
+      // which costs the agent every default instruction it has about using its
+      // tools. Use `append` to add to it instead.
+      systemPrompt: { type: "preset", preset: "claude_code" },
       mcpServers: MCP_SERVERS,
       maxThinkingTokens: thinkingTokens,
-      additionalDirectories: ALLOWED_PATHS,
+      // No `additionalDirectories`: STATE_DIR sits inside WORKING_DIR, so
+      // everything the agent touches is already under its cwd.
       resume: this.sessionId || undefined,
       // Point the spawned Claude Code at the configured provider. The TypeScript
       // SDK replaces the child environment wholesale, so buildProviderEnv()
       // copies process.env in first.
       env: buildProviderEnv(),
-      // Both of these are still enforced under bypassPermissions: deny rules are
-      // evaluated before the permission mode, and hooks run before everything.
-      disallowedTools: DENY_RULES,
-      hooks: createPermissionHooks(),
+      // No tool gate here by design: restricting tool use belongs to the agent
+      // built on this template. Under bypassPermissions the mechanisms that
+      // work are `disallowedTools` and PreToolUse hooks, not `canUseTool`.
     };
-
-    // Add Claude Code executable path if set (required for standalone builds)
-    if (process.env.CLAUDE_CODE_PATH) {
-      options.pathToClaudeCodeExecutable = process.env.CLAUDE_CODE_PATH;
-    }
 
     if (this.sessionId && !isNewSession) {
       console.log(
@@ -313,10 +308,9 @@ class ClaudeSession {
               const toolName = block.name;
               const toolInput = block.input as Record<string, unknown>;
 
-              // Safety checks live in the PreToolUse hook (src/permissions.ts).
-              // They used to run here, but by the time a tool_use block reaches
-              // this loop the tool has already been dispatched, so this was a
-              // report rather than a gate.
+              // Safety checks used to run here. This loop only observes the
+              // message stream - the Claude Code process does not wait for it,
+              // so it was a report rather than a gate.
 
               // Segment ends when tool starts
               if (currentSegmentText) {

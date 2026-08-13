@@ -22,8 +22,14 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
-# user-specific MCP config (use mcp-config.example.ts as template)
-mcp-config.ts
+# environment-specific compose file (use the .example as template)
+deployment/docker-compose.yml
+
+# default bind-mount target for /data when STATE_PATH is unset
+data
+
+# local planning notes (tasks/todo.md, tasks/lessons.md)
+tasks
 
 # caches
 .eslintcache
@@ -32,6 +38,9 @@ mcp-config.ts
 
 # IntelliJ based IDEs
 .idea
+
+# VS Code
+.vscode
 
 # Cursor
 .cursor

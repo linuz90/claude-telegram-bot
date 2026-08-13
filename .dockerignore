@@ -1,12 +1,14 @@
+# Stays in the repository root: Docker only reads .dockerignore from the root of
+# the build context, which is the repository root even though the Dockerfile
+# lives in deployment/.
 .git
 .github
 node_modules
-assets
+deployment
 docs
-launchagent
+.claude
+.vscode
 .env
 .env.*
-!.env.example
-mcp-config.ts
 *.log
 tasks

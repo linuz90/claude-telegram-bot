@@ -1,0 +1,35 @@
+# Copy to deployment/docker-compose.yml (gitignored) and adjust for this host,
+# then run from the repository root:
+#
+#   cp deployment/docker-compose.example.yml deployment/docker-compose.yml
+#   docker compose -f deployment/docker-compose.yml up -d --build
+#
+# Relative paths resolve against this file's directory, hence the ".."
+# everywhere. The build context is the repository root: the image needs src/,
+# package.json and bun.lock, and .dockerignore is only read from a context root.
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    # The SDK spawns child processes; init reaps them instead of leaving zombies.
+    init: true
+
+    # Run as the owner of the mounted directory instead of the image's uid 1000.
+    # See "Permissions on the deploy host" in README.md - without this the agent
+    # cannot write to the mount on Linux.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
+    volumes:
+      # The only thing that has to survive a redeploy: session file, audit log,
+      # Telegram downloads and the agent's memory. It sits inside the agent's
+      # working directory on purpose, so everything it touches is under one
+      # tree. Point STATE_PATH at a directory outside the repository on a real
+      # host.
+      - ${STATE_PATH:-../data}:/app/agent/data
+
+      # The rest of /app/agent is NOT mounted. Instructions and skills live in
+      # agent/ and are baked into the image, so a push to main rebuilds and
+      # ships them. Mounting over them would hide them.

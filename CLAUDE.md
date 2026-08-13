@@ -1,19 +1,34 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working on this repository.
+
+Setup, configuration and deployment are in [README.md](README.md); the provider
+and security models are in [docs/](docs/). This file covers only what you need to
+change code here, and deliberately does not repeat them.
 
 ## Commands
 
 ```bash
-bun run start      # Run the bot
-bun run dev        # Run with auto-reload (--watch)
-bun run typecheck  # Run TypeScript type checking
-bun install        # Install dependencies
+bun run typecheck  # tsc --noEmit - the only thing that runs on the host
+docker compose -f deployment/docker-compose.yml up -d --build
+docker compose -f deployment/docker-compose.yml logs -f
 ```
+
+The bot only runs in the container. `bun run start` and `bun run dev` still exist in `package.json` but assume `/app/agent` and `/app/agent/data`, so they will not work on a host.
 
 ## Architecture
 
-This is a Telegram bot (~3,300 lines TypeScript) that lets you control Claude Code from your phone via text, voice, photos, and documents. Built with Bun and grammY.
+A Telegram bot (~4,400 lines of TypeScript in `src/`) that lets you drive a Claude Code agent from your phone via text, voice, photos, documents and video. Built with Bun and grammY, deployed as a Docker container.
+
+### Layout
+
+| Path | In the image | Role |
+|---|---|---|
+| `src/`, `mcp/` | `/app` | the bot's own code |
+| `agent/` | `/app/agent` | the agent's CLAUDE.md and skills, copied in at build time |
+| — | `/app/agent/data` | volume: session file, audit log, downloads, `memory/` |
+
+`/app/agent/data` is bind-mounted from the host and is the only thing that survives a redeploy. The agent's memory lives in `/app/agent/data/memory`.
 
 ### Message Flow
 
@@ -24,9 +39,10 @@ Telegram message → Handler → Auth check → Rate limit → Claude session �
 ### Key Modules
 
 - **`src/index.ts`** - Entry point, registers handlers, starts polling
-- **`src/config.ts`** - Environment parsing, MCP loading, safety prompts
-- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks
-- **`src/security.ts`** - `RateLimiter` (token bucket), path validation, command safety checks
+- **`src/config.ts`** - Environment parsing, MCP loading, `STATE_DIR` paths
+- **`src/provider.ts`** - LLM provider: endpoint, credential, model tiers, and the env handed to the child Claude Code process
+- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming and session persistence
+- **`src/security.ts`** - `RateLimiter` (token bucket) and `isAuthorized`. That is the whole file; there is no path or command filtering
 - **`src/formatting.ts`** - Markdown→HTML conversion for Telegram, tool status emoji formatting
 - **`src/utils.ts`** - Audit logging, voice transcription (OpenAI), typing indicators
 - **`src/types.ts`** - Shared TypeScript types
@@ -35,7 +51,7 @@ Telegram message → Handler → Auth check → Rate limit → Claude session �
 
 Each message type has a dedicated async handler:
 - **`commands.ts`** - `/start`, `/new`, `/stop`, `/status`, `/resume`, `/restart`, `/retry`
-- **`text.ts`** - Text messages with intent filtering
+- **`text.ts`** - Text messages: auth, `checkInterrupt()` for the `!` prefix, rate limit, then the session
 - **`voice.ts`** - Voice→text via OpenAI, then same flow as text
 - **`audio.ts`** - Audio file transcription via OpenAI (mp3, m4a, ogg, wav, etc.), also handles audio sent as documents
 - **`photo.ts`** - Image analysis with media group buffering (1s timeout for albums)
@@ -44,30 +60,23 @@ Each message type has a dedicated async handler:
 - **`callback.ts`** - Inline keyboard button handling for ask_user MCP
 - **`streaming.ts`** - Shared `StreamingState` and status callback factory
 
-### Security Layers
+### Security
 
-1. User allowlist (`TELEGRAM_ALLOWED_USERS`)
-2. Rate limiting (token bucket, configurable)
-3. Path validation (`ALLOWED_PATHS`)
-4. Command safety (blocked patterns)
-5. System prompt constraints
-6. Audit logging
-
-### Configuration
-
-All config via `.env` (copy from `.env.example`). Key variables:
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS` (required)
-- `CLAUDE_WORKING_DIR` - Working directory for Claude
-- `ALLOWED_PATHS` - Directories Claude can access
-- `OPENAI_API_KEY` - For voice transcription
-
-MCP servers defined in `mcp-config.ts`.
+The agent runs under `bypassPermissions`. Do not add a `canUseTool` callback — it
+never fires in that mode. See [docs/security.md](docs/security.md) before
+touching anything in `src/security.ts` or the options block in `src/session.ts`.
 
 ### Runtime Files
 
-- `/tmp/claude-telegram-session.json` - Session persistence for `/resume`
-- `/tmp/telegram-bot/` - Downloaded photos/documents
-- `/tmp/claude-telegram-audit.log` - Audit log
+All under `STATE_DIR` (`/app/agent/data`):
+
+- `claude-telegram-session.json` - session persistence for `/resume`
+- `telegram-bot/` - downloaded photos and documents
+- `claude-telegram-audit.log` - audit log
+- `memory/` - the agent's persistent notes
+
+The two MCP servers hand off through `/tmp/ask-user-*.json` and
+`/tmp/send-file-*.json`, hardcoded on both sides and independent of `STATE_DIR`.
 
 ## Patterns
 
@@ -79,40 +88,24 @@ MCP servers defined in `mcp-config.ts`.
 
 **Type checking**: Run `bun run typecheck` periodically while editing TypeScript files. Fix any type errors before committing.
 
-**After code changes**: Restart the bot so changes can be tested. Use `launchctl kickstart -k gui/$(id -u)/com.claude-telegram-ts` if running as a service, or `bun run start` for manual runs.
+**After code changes**: rebuild the container. There is no host run mode to test against.
 
-## Standalone Build
+**Adding agent instructions or skills**: they go in `agent/`, never in the repository root. The SDK resolves them relative to `cwd` (`/app/agent`), and the code lives in `/app`.
 
-The bot can be compiled to a standalone binary with `bun build --compile`. This is used by the ClaudeBot macOS app wrapper.
+## Gotchas
 
-### External Dependencies
+**External binaries**: PDF extraction shells out to `pdftotext` and archives to `unzip`, rather than npm packages, to avoid bundling issues. Both are installed in `deployment/Dockerfile`. Any MCP server you add that needs a binary goes there too.
 
-PDF extraction uses `pdftotext` CLI instead of an npm package (to avoid bundling issues):
+**Container paths are not configuration**: `CLAUDE_WORKING_DIR` and `STATE_DIR` are set in the Dockerfile and match the image layout. The defaults in `src/config.ts` mirror them so the code reads the same either way. Do not reintroduce host fallbacks like `homedir()` — that is what this fork removed.
 
-```bash
-brew install poppler  # Provides pdftotext
-```
+**`STATE_DIR` sits inside `CLAUDE_WORKING_DIR`** on purpose. Move it out and the agent loses access to Telegram downloads and its own memory unless you add `additionalDirectories` back.
 
-### PATH Requirements
+**`systemPrompt` must stay a preset object**: a plain string replaces Claude Code's entire system prompt instead of adding to it. Use `{ type: "preset", preset: "claude_code", append: "..." }`.
 
-When running as a standalone binary (especially from a macOS app), the PATH may not include Homebrew. The launcher must ensure PATH includes:
-- `/opt/homebrew/bin` (Apple Silicon Homebrew)
-- `/usr/local/bin` (Intel Homebrew)
+**`.dockerignore` lives in the repository root**, not in `deployment/` next to the Dockerfile. Docker only reads it from the root of the build context.
 
-Without this, `pdftotext` won't be found and PDF parsing will fail silently with an error message.
+**Two gitignored files**: `.env` and `deployment/docker-compose.yml`. Both have a committed `.example` — change it alongside whenever you change what they must contain. `mcp/config.ts` is deliberately *not* a template: one container, one agent, so the server list is part of the build.
 
 ## Commit Style
 
 Do not add "Generated with Claude Code" footers or "Co-Authored-By" trailers to commit messages.
-
-## Running as Service (macOS)
-
-```bash
-cp launchagent/com.claude-telegram-ts.plist.template ~/Library/LaunchAgents/com.claude-telegram-ts.plist
-# Edit plist with your paths
-launchctl load ~/Library/LaunchAgents/com.claude-telegram-ts.plist
-
-# Logs
-tail -f /tmp/claude-telegram-bot-ts.log
-tail -f /tmp/claude-telegram-bot-ts.err
-```

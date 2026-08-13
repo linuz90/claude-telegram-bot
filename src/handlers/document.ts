@@ -2,7 +2,8 @@
  * Document handler for Claude Telegram Bot.
  *
  * Supports PDFs and text files with media group buffering.
- * PDF extraction uses pdftotext CLI (install via: brew install poppler)
+ * Shells out to pdftotext, unzip and tar; all three are installed in
+ * deployment/Dockerfile.
  */
 
 import type { Context } from "grammy";
@@ -88,14 +89,14 @@ async function extractText(
   const fileName = filePath.split("/").pop() || "";
   const extension = "." + (fileName.split(".").pop() || "").toLowerCase();
 
-  // PDF extraction using pdftotext CLI (install: brew install poppler)
+  // PDF extraction via the pdftotext CLI, installed by deployment/Dockerfile.
   if (mimeType === "application/pdf" || extension === ".pdf") {
     try {
       const result = await Bun.$`pdftotext -layout ${filePath} -`.quiet();
       return result.text();
     } catch (error) {
       console.error("PDF parsing failed:", error);
-      return "[PDF parsing failed - ensure pdftotext is installed: brew install poppler]";
+      return "[PDF parsing failed - see the container logs]";
     }
   }
 

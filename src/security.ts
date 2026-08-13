@@ -1,19 +1,16 @@
 /**
  * Security module for Claude Telegram Bot.
  *
- * Rate limiting, path validation, command safety.
+ * Authorization and rate limiting. That is the whole list: the agent runs under
+ * `bypassPermissions`, so nothing here constrains what it does once a message
+ * gets through. See docs/security.md.
  */
 
-import { resolve, normalize } from "path";
-import { realpathSync } from "fs";
 import type { RateLimitBucket } from "./types";
 import {
-  ALLOWED_PATHS,
-  BLOCKED_PATTERNS,
   RATE_LIMIT_ENABLED,
   RATE_LIMIT_REQUESTS,
   RATE_LIMIT_WINDOW,
-  TEMP_PATHS,
 } from "./config";
 
 // ============== Rate Limiter ==============
@@ -74,86 +71,6 @@ class RateLimiter {
 }
 
 export const rateLimiter = new RateLimiter();
-
-// ============== Path Validation ==============
-
-export function isPathAllowed(path: string): boolean {
-  try {
-    // Expand ~ and resolve to absolute path
-    const expanded = path.replace(/^~/, process.env.HOME || "");
-    const normalized = normalize(expanded);
-
-    // Try to resolve symlinks (may fail if path doesn't exist yet)
-    let resolved: string;
-    try {
-      resolved = realpathSync(normalized);
-    } catch {
-      resolved = resolve(normalized);
-    }
-
-    // Always allow temp paths (for bot's own files)
-    for (const tempPath of TEMP_PATHS) {
-      if (resolved.startsWith(tempPath)) {
-        return true;
-      }
-    }
-
-    // Check against allowed paths using proper containment
-    for (const allowed of ALLOWED_PATHS) {
-      const allowedResolved = resolve(allowed);
-      if (
-        resolved === allowedResolved ||
-        resolved.startsWith(allowedResolved + "/")
-      ) {
-        return true;
-      }
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-// ============== Command Safety ==============
-
-export function checkCommandSafety(
-  command: string
-): [safe: boolean, reason: string] {
-  const lowerCommand = command.toLowerCase();
-
-  // Check blocked patterns
-  for (const pattern of BLOCKED_PATTERNS) {
-    if (lowerCommand.includes(pattern.toLowerCase())) {
-      return [false, `Blocked pattern: ${pattern}`];
-    }
-  }
-
-  // Special handling for rm commands - validate paths
-  if (lowerCommand.includes("rm ")) {
-    try {
-      // Simple parsing: extract arguments after rm
-      const rmMatch = command.match(/rm\s+(.+)/i);
-      if (rmMatch) {
-        const args = rmMatch[1]!.split(/\s+/);
-        for (const arg of args) {
-          // Skip flags
-          if (arg.startsWith("-") || arg.length <= 1) continue;
-
-          // Check if path is allowed
-          if (!isPathAllowed(arg)) {
-            return [false, `rm target outside allowed paths: ${arg}`];
-          }
-        }
-      }
-    } catch {
-      // If parsing fails, be cautious
-      return [false, "Could not parse rm command for safety check"];
-    }
-  }
-
-  return [true, ""];
-}
 
 // ============== Authorization ==============
 

@@ -255,7 +255,8 @@ export async function handleRestart(ctx: Context): Promise<void> {
   // Give time for the message to send
   await Bun.sleep(500);
 
-  // Exit - launchd will restart us
+  // Exit - Docker's `restart: unless-stopped` policy brings us back up.
+  // Without a restart policy the container just stops, so /restart becomes /stop.
   process.exit(0);
 }
 
