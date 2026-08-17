@@ -7,8 +7,8 @@ Run a Claude Code agent from Telegram. Send text, voice, photos, documents,
 audio and video; see the reply and the tool calls stream back in real time.
 
 Fork of [linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot),
-with three changes: it runs on **any Anthropic-compatible provider** (Kimi by
-default) instead of a claude.ai subscription, the model is configurable, and it
+with three changes: it runs on **any Anthropic-compatible provider** (OpenRouter
+by default) instead of a claude.ai subscription, the model is configurable, and it
 deploys as a Docker container instead of a macOS LaunchAgent.
 
 This is a template. It ships no agent instructions of its own: put a `CLAUDE.md`
@@ -38,7 +38,7 @@ supported way to run it.
 
 ```bash
 cp .env.example .env
-# Fill in TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS and KIMI_API_KEY
+# Fill in TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS and OPENROUTER_API_KEY
 
 cp deployment/docker-compose.example.yml deployment/docker-compose.yml
 
@@ -82,7 +82,7 @@ session strings in `src/session.ts`; there is no message catalogue to swap.
 ```bash
 TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF...   # From @BotFather
 TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
-KIMI_API_KEY=sk-...                        # Or ANTHROPIC_AUTH_TOKEN
+OPENROUTER_API_KEY=sk-or-...               # Or ANTHROPIC_AUTH_TOKEN
 ```
 
 Find your user ID by messaging [@userinfobot](https://t.me/userinfobot).
@@ -137,20 +137,20 @@ in the image, so add it to `deployment/Dockerfile` too.
 
 ## Provider setup
 
-Every provider setting has a working default, so `KIMI_API_KEY` is the only one
-you have to touch. The rest, with their defaults:
+Every provider setting has a working default, so `OPENROUTER_API_KEY` is the
+only one you have to touch. The rest, with their defaults:
 
 ```bash
-# Endpoint. Override this together with the model variables to point at another
-# Anthropic-compatible provider, OpenRouter included.
-ANTHROPIC_BASE_URL=https://api.moonshot.ai/anthropic
+# Endpoint. No trailing /v1 - the SDK appends /v1/messages itself, so a URL
+# ending in /v1 gives a 404. Override this together with all three model
+# variables to point at another Anthropic-compatible provider, Kimi included.
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
 
-# The three tiers. "[1m]" selects the 1M context window. opus and haiku fall
-# back to sonnet; point haiku at kimi-k2.6 if the internal small/fast calls are
-# not worth k3.
-BOT_MODEL_SONNET=kimi-k3[1m]
-BOT_MODEL_OPUS=
-BOT_MODEL_HAIKU=
+# The three tiers. Each has its own default, so switching provider means setting
+# all three. Haiku serves the internal small/fast calls, so keep it cheap.
+BOT_MODEL_SONNET=anthropic/claude-sonnet-5
+BOT_MODEL_OPUS=anthropic/claude-opus-5
+BOT_MODEL_HAIKU=anthropic/claude-haiku-4.5
 
 # Which tier this session runs on: opus, sonnet or haiku. A raw model name also
 # works, but then skips the tier mapping for the main loop.
@@ -171,7 +171,7 @@ locally, so a claude.ai login still works for development.
 
 → **[docs/provider.md](docs/provider.md)** covers why the credential goes in
 `ANTHROPIC_AUTH_TOKEN`, how the model tiers resolve, where this setup deviates
-from Kimi's guide, and how to switch to another provider.
+from OpenRouter's guide, and how to switch to another provider.
 
 ## Bot commands
 
@@ -286,7 +286,7 @@ Start with the logs: `docker compose -f deployment/docker-compose.yml logs -f`.
 that the container is up.
 
 **401 from the provider** — the key is in the wrong variable. It belongs in
-`KIMI_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, which is sent as
+`OPENROUTER_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, which is sent as
 `Authorization: Bearer`.
 
 **Model not found** — the endpoint and the model names disagree. Changing

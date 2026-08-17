@@ -1,14 +1,14 @@
 /**
  * LLM provider configuration for the Claude Telegram Bot.
  *
- * Points the Claude Agent SDK at Kimi's Anthropic-compatible endpoint so the bot
- * authenticates with a static API key instead of a claude.ai login. That removes
- * the OAuth session refresh entirely and keeps production traffic off a personal
- * subscription.
+ * Points the Claude Agent SDK at OpenRouter's Anthropic-compatible endpoint so
+ * the bot authenticates with a static API key instead of a claude.ai login. That
+ * removes the OAuth session refresh entirely and keeps production traffic off a
+ * personal subscription.
  *
- * Everything below has a working default. In practice only KIMI_API_KEY has to
- * be set. Overriding ANTHROPIC_BASE_URL and the model variables together points
- * the same machinery at any other Anthropic-compatible endpoint, OpenRouter
+ * Everything below has a working default. In practice only OPENROUTER_API_KEY
+ * has to be set. Overriding ANTHROPIC_BASE_URL and the model variables together
+ * points the same machinery at any other Anthropic-compatible endpoint, Kimi
  * included.
  */
 
@@ -16,15 +16,23 @@ import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
 // ============== Endpoint ==============
 
+// No trailing "/v1". The SDK appends "/v1/messages" itself, so a base URL that
+// already ends in /v1 produces /api/v1/v1/messages and a 404.
 export const PROVIDER_BASE_URL =
-  process.env.ANTHROPIC_BASE_URL || "https://api.moonshot.ai/anthropic";
+  process.env.ANTHROPIC_BASE_URL || "https://openrouter.ai/api";
 
-// The credential. Kimi documents ANTHROPIC_AUTH_TOKEN rather than
-// ANTHROPIC_API_KEY, and that is the right choice for a headless bot anyway: an
-// auth token takes precedence immediately, while an API key asks for a one-time
-// interactive approval that a bot can never give.
+// The credential. OpenRouter, like Kimi, documents ANTHROPIC_AUTH_TOKEN rather
+// than ANTHROPIC_API_KEY, and that is the right choice for a headless bot
+// anyway: an auth token takes precedence immediately, while an API key asks for
+// a one-time interactive approval that a bot can never give.
+//
+// KIMI_API_KEY still works, so an existing deployment keeps running until its
+// .env is updated.
 const PROVIDER_API_KEY =
-  process.env.KIMI_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  process.env.OPENROUTER_API_KEY ||
+  process.env.ANTHROPIC_AUTH_TOKEN ||
+  process.env.KIMI_API_KEY ||
+  "";
 
 export const PROVIDER_CONFIGURED = PROVIDER_API_KEY.length > 0;
 
@@ -36,17 +44,23 @@ export const PROVIDER_CONFIGURED = PROVIDER_API_KEY.length > 0;
 // of the provider's models: the main loop, subagents that ask for a tier by
 // name, and the internal small/fast calls all route through this mapping.
 //
-// The "[1m]" suffix selects the 1M context window; Claude Code strips it before
-// resolving and puts it back afterwards.
-const SONNET_MODEL = process.env.BOT_MODEL_SONNET || "kimi-k3[1m]";
+// OpenRouter model IDs are "vendor/model". Anthropic's own models are the safe
+// default: OpenRouter documents this endpoint as built around them and warns
+// that other vendors may not behave. Anything in its catalogue works.
+const SONNET_MODEL =
+  process.env.BOT_MODEL_SONNET || "anthropic/claude-sonnet-5";
 
-// Both fall back to the sonnet tier rather than staying unset. An unset tier is
-// not an unused tier: the resolver then returns a hardcoded Anthropic model ID,
-// which fails the moment anything asks for that tier through a provider that has
-// never heard of it. Point haiku at something cheaper (kimi-k2.6) if the
-// internal small/fast calls are not worth k3.
-const OPUS_MODEL = process.env.BOT_MODEL_OPUS || SONNET_MODEL;
-const HAIKU_MODEL = process.env.BOT_MODEL_HAIKU || SONNET_MODEL;
+// Each tier gets its own default rather than falling back to sonnet. An unset
+// tier is not an unused tier: the resolver then returns a hardcoded Anthropic
+// model ID, which fails the moment anything asks for that tier through a
+// provider that has never heard of it. Haiku serves the internal small/fast
+// calls, so it is worth keeping cheap.
+//
+// Because the three are independent, pointing the endpoint at another provider
+// means setting all three - overriding only sonnet leaves the other two on
+// Anthropic model IDs that provider will reject.
+const OPUS_MODEL = process.env.BOT_MODEL_OPUS || "anthropic/claude-opus-5";
+const HAIKU_MODEL = process.env.BOT_MODEL_HAIKU || "anthropic/claude-haiku-4.5";
 
 // Which tier the session itself runs on. An alias keeps the whole stack on the
 // mapping above; a raw model name is accepted too and then bypasses it for the
@@ -55,8 +69,8 @@ export const BOT_MODEL_MAIN = process.env.BOT_MODEL_MAIN || "sonnet";
 
 // ============== Reasoning ==============
 
-// Kimi recommends the highest reasoning effort for k3. Passed to the SDK as
-// `options.effort` in src/session.ts, not through the child environment.
+// Passed to the SDK as `options.effort` in src/session.ts, not through the child
+// environment.
 //
 // Anything outside this set is rejected at startup rather than silently falling
 // back: a typo here costs reasoning quality on every message and is invisible
@@ -83,9 +97,10 @@ function envFlag(name: string): boolean {
   return (process.env[name] || "").trim().toLowerCase() === "true";
 }
 
-// Kimi's endpoint accepts thinking blocks and native tool use, so these stay OFF
-// by default. Turn one on only when a model rejects the corresponding request
-// fields with a 400.
+// OpenRouter passes thinking blocks and native tool use through to Anthropic, so
+// these stay OFF by default. Turn one on only when a model rejects the
+// corresponding request fields with a 400 - most likely with a non-Anthropic
+// model behind the same endpoint.
 export const ADAPTIVE_THINKING_DISABLED = envFlag(
   "BOT_DISABLE_ADAPTIVE_THINKING"
 );
@@ -129,10 +144,10 @@ export function buildProviderEnv(): Record<string, string> {
   // behaviour and stops a stray value from the host environment winning.
   env.ANTHROPIC_SMALL_FAST_MODEL = HAIKU_MODEL;
 
-  // CLAUDE_CODE_SUBAGENT_MODEL is deliberately not set, even though Kimi's guide
-  // lists it. It overrides every subagent unconditionally, including ones that
-  // ask for a tier by name, which would collapse the mapping above into a single
-  // model. With all three tiers on one model the effect is identical anyway.
+  // CLAUDE_CODE_SUBAGENT_MODEL is deliberately not set, even though both Kimi's
+  // and OpenRouter's guides list it. It overrides every subagent
+  // unconditionally, including ones that ask for a tier by name, which would
+  // collapse the mapping above into a single model.
   delete env.CLAUDE_CODE_SUBAGENT_MODEL;
 
   if (ADAPTIVE_THINKING_DISABLED) {
@@ -154,6 +169,6 @@ if (PROVIDER_CONFIGURED) {
   );
 } else {
   console.warn(
-    "WARNING: no KIMI_API_KEY or ANTHROPIC_AUTH_TOKEN set - falling back to whatever credentials Claude Code finds locally"
+    "WARNING: no OPENROUTER_API_KEY or ANTHROPIC_AUTH_TOKEN set - falling back to whatever credentials Claude Code finds locally"
   );
 }

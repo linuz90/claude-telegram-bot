@@ -1,8 +1,13 @@
 # Provider setup
 
-The bot talks to any Anthropic-compatible endpoint. Kimi is the default. All of
-this lives in `src/provider.ts`; the variables are listed in the README under
-[Provider setup](../README.md#provider-setup).
+The bot talks to any Anthropic-compatible endpoint. OpenRouter is the default.
+All of this lives in `src/provider.ts`; the variables are listed in the README
+under [Provider setup](../README.md#provider-setup).
+
+The base URL is `https://openrouter.ai/api`, **without** a trailing `/v1`. The
+SDK appends `/v1/messages` itself, so `.../api/v1` becomes
+`/api/v1/v1/messages`, which is a 404. Verified: `POST /api/v1/messages` returns
+401, `POST /api/v1/v1/messages` returns 404.
 
 ## Why a static key instead of a claude.ai login
 
@@ -29,15 +34,29 @@ the provider's models underneath: the main loop, subagents that declare
 
 An unset tier is not an unused tier. The resolver falls back to a hardcoded
 Anthropic model ID, which fails against a provider that has never heard of it.
-That is why `BOT_MODEL_OPUS` and `BOT_MODEL_HAIKU` default to the sonnet value
-instead of staying empty.
+That is why all three of `BOT_MODEL_SONNET`, `BOT_MODEL_OPUS` and
+`BOT_MODEL_HAIKU` carry their own default instead of staying empty:
+
+| Tier | Default |
+|---|---|
+| sonnet | `anthropic/claude-sonnet-5` |
+| opus | `anthropic/claude-opus-5` |
+| haiku | `anthropic/claude-haiku-4.5` |
+
+OpenRouter model IDs are `vendor/model`. Anthropic's own models are the default
+because OpenRouter documents this endpoint as built around them and warns that
+other vendors may not behave; anything in its catalogue works.
+
+Because the three are independent, switching provider means setting all three.
+Overriding only sonnet leaves the other two on Anthropic IDs the new provider
+will reject.
 
 The `[1m]` suffix on a model name selects the 1M context window. Claude Code
 strips it before resolving and puts it back afterwards.
 
-## Deviations from Kimi's guide
+## Deviations from the provider guides
 
-[Use Kimi in Claude Code](https://platform.kimi.ai/docs/guide/claude-code-kimi)
+[OpenRouter's Claude Code integration](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration)
 is the source for this setup. One of its recommendations is not followed.
 
 | Guide says | Here | Why |
@@ -46,6 +65,12 @@ is the source for this setup. One of its recommendations is not followed.
 
 `ANTHROPIC_MODEL` from the guide is not needed either: the SDK passes
 `options.model` to the CLI as `--model`, which covers the same slot.
+
+Two more of OpenRouter's variables are left out. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`
+lets the CLI list the gateway's catalogue, which a bot with three fixed tiers
+never needs, and `CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK` only matters for the
+interactive `/fast` command. Set either in `.env` if you want them; nothing here
+strips them.
 
 `CLAUDE_CODE_EFFORT_LEVEL` is not set either, but for a different reason: effort
 is an SDK option now (`options.effort` in `src/session.ts`), so the environment
@@ -72,13 +97,14 @@ version and build date behind a given SDK release.
 
 ## Models and thinking
 
-Per Kimi's guide, `kimi-k3` has thinking on by default and needs nothing else.
-`kimi-k2.7-code` requires thinking to be *enabled* and rejects requests without
-it. `kimi-k2.6` runs fine with thinking off.
+OpenRouter passes thinking blocks and native tool use straight through to
+Anthropic, so the defaults need no adjustment.
 
-That matters here because thinking is keyword-driven: `getThinkingLevel()` in
-`src/session.ts` returns 0 unless the message contains a trigger word from
-`THINKING_KEYWORDS`, so `kimi-k2.7-code` will reject most messages.
+It matters for other vendors behind the same endpoint, because thinking here is
+keyword-driven: `getThinkingLevel()` in `src/session.ts` returns 0 unless the
+message contains a trigger word from `THINKING_KEYWORDS`. A model that *requires*
+thinking to be enabled — Kimi's `kimi-k2.7-code`, for one — will reject most
+messages.
 
 If a model misbehaves:
 
@@ -90,14 +116,17 @@ If a model misbehaves:
 
 ## Switching providers
 
-Override the endpoint and the model variables together:
+Override the endpoint and all three model variables together. Kimi, for example:
 
 ```bash
-ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
-BOT_MODEL_SONNET=anthropic/claude-sonnet-4.5
-BOT_MODEL_OPUS=anthropic/claude-opus-4.1
-BOT_MODEL_HAIKU=anthropic/claude-haiku-4.5
+ANTHROPIC_BASE_URL=https://api.moonshot.ai/anthropic
+BOT_MODEL_SONNET=kimi-k3[1m]
+BOT_MODEL_OPUS=kimi-k3[1m]
+BOT_MODEL_HAIKU=kimi-k2.6
 ```
 
-Leaving the models pointed at Kimi names while changing only the URL produces
-model-not-found errors, not a fallback.
+Changing only the URL produces model-not-found errors, not a fallback.
+
+The credential is read from `OPENROUTER_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
+`KIMI_API_KEY`, in that order, so an existing deployment keeps working until its
+`.env` is updated.
