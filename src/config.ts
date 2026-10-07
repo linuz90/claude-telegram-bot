@@ -50,20 +50,13 @@ export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
 
 // ============== Claude CLI Path ==============
 
-// Auto-detect from PATH, or use environment override
-function findClaudeCli(): string {
-  const envPath = process.env.CLAUDE_CLI_PATH;
-  if (envPath) return envPath;
-
-  // Try to find claude in PATH using Bun.which
-  const whichResult = Bun.which("claude");
-  if (whichResult) return whichResult;
-
-  // Final fallback
-  return "/usr/local/bin/claude";
-}
-
-export const CLAUDE_CLI_PATH = findClaudeCli();
+// Unset = the CLI bundled with the Agent SDK, which is version-locked to it.
+// No PATH auto-detect: a stale global `claude` may reject flags the SDK passes.
+// Standalone builds must set this, since the bundled binary can't be resolved
+// from inside a `bun build --compile` executable. CLAUDE_CODE_PATH is the older
+// name from the standalone-build support, kept so existing launchers still work.
+export const CLAUDE_CLI_PATH: string | undefined =
+  process.env.CLAUDE_CLI_PATH || process.env.CLAUDE_CODE_PATH || undefined;
 
 // ============== MCP Configuration ==============
 
@@ -247,5 +240,5 @@ if (ALLOWED_USERS.length === 0) {
 }
 
 console.log(
-  `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`
+  `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}, model: ${CLAUDE_MODEL}, CLI: ${CLAUDE_CLI_PATH ?? "bundled"}`
 );
