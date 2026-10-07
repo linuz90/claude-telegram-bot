@@ -67,6 +67,7 @@ All config via `.env` (copy from `.env.example`). Key variables:
 - `CLAUDE_WORKING_DIR` - Working directory for Claude
 - `ALLOWED_PATHS` - Directories Claude can access
 - `OPENAI_API_KEY` - For voice transcription
+- `CLAUDE_MODEL` - Full model ID passed to the Agent SDK (default `claude-sonnet-5-5`)
 
 MCP servers defined in `mcp-config.ts`.
 

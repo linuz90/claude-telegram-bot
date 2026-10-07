@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
+  CLAUDE_MODEL,
   MCP_SERVERS,
   SAFETY_PROMPT,
   SESSION_FILE,
@@ -215,7 +216,7 @@ export class ClaudeSession {
 
     // Build SDK V1 options - supports all features
     const options: Options = {
-      model: "claude-sonnet-4-5",
+      model: CLAUDE_MODEL,
       cwd: WORKING_DIR,
       settingSources: ["user", "project"],
       permissionMode: "bypassPermissions",

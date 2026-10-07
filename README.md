@@ -94,6 +94,9 @@ TELEGRAM_ALLOWED_USERS=123456789           # Your Telegram user ID
 # Recommended
 CLAUDE_WORKING_DIR=/path/to/your/folder    # Where Claude runs (loads CLAUDE.md, skills, MCP)
 OPENAI_API_KEY=sk-...                      # For voice transcription
+
+# Optional
+CLAUDE_MODEL=claude-sonnet-5-5             # Full model ID (default: claude-sonnet-5-5)
 ```
 
 **Finding your Telegram user ID:** Message [@userinfobot](https://t.me/userinfobot) on Telegram.

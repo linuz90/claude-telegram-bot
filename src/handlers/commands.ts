@@ -6,7 +6,12 @@
 
 import type { Context } from "grammy";
 import { getSession } from "../ext/session-manager";
-import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
+import {
+  ALLOWED_USERS,
+  CLAUDE_MODEL,
+  RESTART_FILE,
+  WORKING_DIR,
+} from "../config";
 import { isAuthorized } from "../security";
 
 /**
@@ -165,6 +170,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
 
   // Working directory
   lines.push(`\n📁 Working dir: <code>${WORKING_DIR}</code>`);
+  lines.push(`🤖 Model: <code>${CLAUDE_MODEL}</code>`);
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
 }
