@@ -80,16 +80,7 @@ Note: API usage is billed per token and can get expensive quickly for heavy use.
 2. Send `/newbot` and follow the prompts to create your bot
 3. Copy the token (looks like `1234567890:ABC-DEF...`)
 
-Then send `/setcommands` to BotFather and paste this:
-
-```
-start - Show status and user ID
-new - Start a fresh session
-resume - Pick from recent sessions to resume
-stop - Interrupt current query
-status - Check what Claude is doing
-restart - Restart the bot
-```
+The bot registers its `/` command menu on startup, so there's no need to run `/setcommands` in BotFather (any list set there is overwritten).
 
 ### 2. Configure Environment
 
