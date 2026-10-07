@@ -10,7 +10,7 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
@@ -77,7 +77,7 @@ function getTextFromMessage(msg: SDKMessage): string | null {
 // Maximum number of sessions to keep in history
 const MAX_SESSIONS = 5;
 
-class ClaudeSession {
+export class ClaudeSession {
   sessionId: string | null = null;
   lastActivity: Date | null = null;
   queryStarted: Date | null = null;
@@ -94,6 +94,11 @@ class ClaudeSession {
   private stopRequested = false;
   private _isProcessing = false;
   private _wasInterruptedByNewMessage = false;
+
+  // sessionKey distinguishes concurrent per-thread instances in the session
+  // history file (see src/ext/session-manager.ts). "default" preserves the
+  // pre-existing single-session behavior exactly.
+  constructor(private sessionKey: string = "default") {}
 
   get isActive(): boolean {
     return this.sessionId !== null;
@@ -512,6 +517,7 @@ class ClaudeSession {
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
         title: this.conversationTitle || "Untitled session",
+        session_key: this.sessionKey,
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -528,8 +534,9 @@ class ClaudeSession {
       // Keep only the last MAX_SESSIONS
       history.sessions = history.sessions.slice(0, MAX_SESSIONS);
 
-      // Save
-      Bun.write(SESSION_FILE, JSON.stringify(history, null, 2));
+      // Sync write: per-topic sessions can save concurrently, and an unawaited
+      // Bun.write would let one read-modify-write drop another's entry.
+      writeFileSync(SESSION_FILE, JSON.stringify(history, null, 2));
       console.log(`Session saved to ${SESSION_FILE}`);
     } catch (error) {
       console.warn(`Failed to save session: ${error}`);
@@ -558,9 +565,11 @@ class ClaudeSession {
    */
   getSessionList(): SavedSession[] {
     const history = this.loadSessionHistory();
-    // Filter to only sessions for current working directory
+    // Filter to only sessions for current working directory and this thread's key
     return history.sessions.filter(
-      (s) => !s.working_dir || s.working_dir === WORKING_DIR
+      (s) =>
+        (!s.working_dir || s.working_dir === WORKING_DIR) &&
+        (s.session_key ?? "default") === this.sessionKey
     );
   }
 
@@ -608,6 +617,3 @@ class ClaudeSession {
     return this.resumeSession(sessions[0]!.session_id);
   }
 }
-
-// Global session instance
-export const session = new ClaudeSession();

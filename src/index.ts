@@ -24,6 +24,7 @@ import {
   handleVideo,
   handleCallback,
 } from "./handlers";
+import { keyForCtx } from "./ext/session-manager";
 
 // Create bot instance
 const bot = new Bot(TELEGRAM_TOKEN);
@@ -44,8 +45,9 @@ bot.use(
     if (ctx.callbackQuery) {
       return undefined;
     }
-    // Other messages are sequentialized per chat
-    return ctx.chat?.id.toString();
+    // Other messages are sequentialized per chat+thread (so one Telegram
+    // forum topic no longer blocks processing in another)
+    return keyForCtx(ctx);
   })
 );
 

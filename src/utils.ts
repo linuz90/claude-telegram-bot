@@ -8,6 +8,7 @@ import OpenAI from "openai";
 import type { Chat } from "grammy/types";
 import type { Context } from "grammy";
 import type { AuditEvent } from "./types";
+import type { ClaudeSession } from "./session";
 import {
   AUDIT_LOG_PATH,
   AUDIT_LOG_JSON,
@@ -201,36 +202,24 @@ export function startTypingIndicator(ctx: Context): TypingController {
 
 // ============== Message Interrupt ==============
 
-// Import session lazily to avoid circular dependency
-let sessionModule: {
-  session: {
-    isRunning: boolean;
-    stop: () => Promise<"stopped" | "pending" | false>;
-    markInterrupt: () => void;
-    clearStopRequested: () => void;
-  };
-} | null = null;
-
-export async function checkInterrupt(text: string): Promise<string> {
+export async function checkInterrupt(
+  text: string,
+  session: ClaudeSession
+): Promise<string> {
   if (!text || !text.startsWith("!")) {
     return text;
-  }
-
-  // Lazy import to avoid circular dependency
-  if (!sessionModule) {
-    sessionModule = await import("./session");
   }
 
   const strippedText = text.slice(1).trimStart();
   const normalizedInterrupt = strippedText.trim().toLowerCase();
 
-  if (sessionModule.session.isRunning) {
+  if (session.isRunning) {
     console.log("! prefix - interrupting current query");
-    sessionModule.session.markInterrupt();
-    await sessionModule.session.stop();
+    session.markInterrupt();
+    await session.stop();
     await Bun.sleep(100);
     // Clear stopRequested so the new message can proceed
-    sessionModule.session.clearStopRequested();
+    session.clearStopRequested();
   }
 
   // Treat !stop as a pure stop alias (same behavior as /stop):
