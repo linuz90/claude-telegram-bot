@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
+  CLAUDE_CLI_PATH,
   CLAUDE_MODEL,
   MCP_SERVERS,
   SAFETY_PROMPT,
@@ -223,15 +224,15 @@ export class ClaudeSession {
       allowDangerouslySkipPermissions: true,
       systemPrompt: SAFETY_PROMPT,
       mcpServers: MCP_SERVERS,
-      maxThinkingTokens: thinkingTokens,
+      // Without display, Sonnet 5.5 returns empty thinking blocks and the
+      // thinking status never reaches Telegram
+      thinking: thinkingTokens
+        ? { type: "enabled", budgetTokens: thinkingTokens, display: "summarized" }
+        : { type: "disabled" },
       additionalDirectories: ALLOWED_PATHS,
       resume: this.sessionId || undefined,
+      pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
     };
-
-    // Add Claude Code executable path if set (required for standalone builds)
-    if (process.env.CLAUDE_CODE_PATH) {
-      options.pathToClaudeCodeExecutable = process.env.CLAUDE_CODE_PATH;
-    }
 
     if (this.sessionId && !isNewSession) {
       console.log(

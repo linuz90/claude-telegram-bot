@@ -28,7 +28,7 @@ Telegram message → Handler → Auth check → Rate limit → Claude session �
 
 - **`src/index.ts`** - Entry point, registers handlers, starts polling
 - **`src/config.ts`** - Environment parsing, MCP loading, safety prompts
-- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks. Takes an optional `sessionKey` (default `"default"`) used to scope saved history per forum topic.
+- **`src/session.ts`** - `ClaudeSession` class wrapping the Agent SDK `query()` API with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks. Takes an optional `sessionKey` (default `"default"`) used to scope saved history per forum topic.
 - **`src/security.ts`** - `RateLimiter` (token bucket), path validation, command safety checks
 - **`src/formatting.ts`** - Markdown→HTML conversion for Telegram, tool status emoji formatting
 - **`src/utils.ts`** - Audit logging, voice transcription (OpenAI), typing indicators
@@ -68,6 +68,7 @@ All config via `.env` (copy from `.env.example`). Key variables:
 - `ALLOWED_PATHS` - Directories Claude can access
 - `OPENAI_API_KEY` - For voice transcription
 - `CLAUDE_MODEL` - Full model ID passed to the Agent SDK (default `claude-sonnet-5-5`)
+- `CLAUDE_CLI_PATH` - Claude Code executable; unset uses the CLI bundled with the Agent SDK. New models need an SDK bump (or a newer CLI here) for correct context window and pricing
 
 MCP servers defined in `mcp-config.ts`.
 
@@ -91,7 +92,7 @@ MCP servers defined in `mcp-config.ts`.
 
 ## Standalone Build
 
-The bot can be compiled to a standalone binary with `bun build --compile`. This is used by the ClaudeBot macOS app wrapper.
+The bot can be compiled to a standalone binary with `bun build --compile`. This is used by the ClaudeBot macOS app wrapper. A compiled binary can't resolve the SDK's bundled CLI, so the launcher must set `CLAUDE_CLI_PATH` (the older `CLAUDE_CODE_PATH` still works).
 
 ### External Dependencies
 
