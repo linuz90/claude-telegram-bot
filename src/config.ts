@@ -45,6 +45,9 @@ export const ALLOWED_USERS: number[] = (
 export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
+// Full model ID, passed to the Agent SDK unchanged (no alias table to go stale)
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
+
 // ============== Claude CLI Path ==============
 
 // Auto-detect from PATH, or use environment override
