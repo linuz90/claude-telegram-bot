@@ -224,6 +224,10 @@ export class ClaudeSession {
       allowDangerouslySkipPermissions: true,
       systemPrompt: SAFETY_PROMPT,
       mcpServers: MCP_SERVERS,
+      // CLI 2.1.83+ attaches the account's claude.ai connectors (Gmail, Slack...)
+      // to SDK sessions, where bypassPermissions would run them unprompted.
+      // MCP access stays limited to mcp-config.ts and the user/project settings.
+      settings: { disableClaudeAiConnectors: true },
       // Without display, Sonnet 5.5 returns empty thinking blocks and the
       // thinking status never reaches Telegram
       thinking: thinkingTokens
