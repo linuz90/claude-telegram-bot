@@ -165,13 +165,13 @@ async function handleResumeCallback(
   const sessionId = callbackData.replace("resume:", "");
 
   if (!sessionId || !userId || !chatId) {
-    await ctx.answerCallbackQuery({ text: "ID sessione non valido" });
+    await ctx.answerCallbackQuery({ text: "Invalid session ID" });
     return;
   }
 
   // Check if session is already active
   if (session.isActive) {
-    await ctx.answerCallbackQuery({ text: "Sessione già attiva" });
+    await ctx.answerCallbackQuery({ text: "Session already active. Use /new to start over." });
     return;
   }
 
@@ -189,7 +189,7 @@ async function handleResumeCallback(
   } catch (error) {
     console.debug("Failed to edit resume message:", error);
   }
-  await ctx.answerCallbackQuery({ text: "Sessione ripresa!" });
+  await ctx.answerCallbackQuery({ text: "Session resumed!" });
 
   // Send a hidden recap prompt to Claude
   const recapPrompt =
