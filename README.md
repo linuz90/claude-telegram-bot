@@ -124,8 +124,8 @@ ALLOWED_PATHS=/your/project,/other/path,~/.claude
 Copy and edit the MCP config:
 
 ```bash
-cp mcp-config.ts mcp-config.local.ts
-# Edit mcp-config.local.ts with your MCP servers
+cp mcp-config.example.ts mcp-config.ts
+# Edit mcp-config.ts with your MCP servers
 ```
 
 The bot includes two built-in MCP servers:

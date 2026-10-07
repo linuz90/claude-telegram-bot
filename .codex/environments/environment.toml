@@ -1,0 +1,15 @@
+version = 1
+name = "claude-telegram-bot"
+
+[setup]
+script = "./workspace-setup.sh init"
+
+[[actions]]
+name = "Run"
+icon = "run"
+command = "bun run dev"
+
+[[actions]]
+name = "Typecheck"
+icon = "test"
+command = "bun run typecheck"

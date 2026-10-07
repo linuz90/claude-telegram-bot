@@ -1,0 +1,9 @@
+"$schema" = "https://www.conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "./workspace-setup.sh init"
+
+[scripts.run.dev]
+command = "bun run dev"
+default = true
+icon = "play"

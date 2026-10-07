@@ -39,3 +39,6 @@ mcp-config.ts
 # Finder (MacOS) folder config
 .DS_Store
 /claude-bot-standalone
+
+# Conductor personal overrides
+.conductor/settings.local.toml

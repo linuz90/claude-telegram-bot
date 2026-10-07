@@ -11,6 +11,8 @@ bun run typecheck  # Run TypeScript type checking
 bun install        # Install dependencies
 ```
 
+Managed worktrees run `./workspace-setup.sh init`; after a plain `git worktree add`, run it yourself. Every checkout shares the `.env` bot token, so stop any other running instance before `bun run dev` (Telegram rejects concurrent polling with a 409).
+
 ## Architecture
 
 This is a Telegram bot (~3,300 lines TypeScript) that lets you control Claude Code from your phone via text, voice, photos, and documents. Built with Bun and grammY.

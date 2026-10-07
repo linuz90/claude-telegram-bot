@@ -1,0 +1,3 @@
+# Copy ignored local configuration into managed worktrees.
+.env*
+mcp-config.ts

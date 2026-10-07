@@ -1,0 +1,23 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "defaultThreadEnvMode": "worktree",
+  "scripts": [
+    {
+      "name": "Setup Worktree",
+      "command": "./workspace-setup.sh init",
+      "icon": "configure",
+      "runOnWorktreeCreate": true,
+      "async": false
+    },
+    {
+      "name": "Run",
+      "command": "bun run dev",
+      "icon": "play"
+    },
+    {
+      "name": "Typecheck",
+      "command": "bun run typecheck",
+      "icon": "test"
+    }
+  ]
+}
