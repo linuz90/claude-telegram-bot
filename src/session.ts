@@ -516,7 +516,7 @@ export class ClaudeSession {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
-        title: this.conversationTitle || "Sessione senza titolo",
+        title: this.conversationTitle || "Untitled session",
         session_key: this.sessionKey,
       };
 
@@ -581,13 +581,13 @@ export class ClaudeSession {
     const sessionData = history.sessions.find((s) => s.session_id === sessionId);
 
     if (!sessionData) {
-      return [false, "Sessione non trovata"];
+      return [false, "Session not found"];
     }
 
     if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
       return [
         false,
-        `Sessione per directory diversa: ${sessionData.working_dir}`,
+        `Session belongs to a different directory: ${sessionData.working_dir}`,
       ];
     }
 
@@ -601,7 +601,7 @@ export class ClaudeSession {
 
     return [
       true,
-      `Ripresa sessione: "${sessionData.title}"`,
+      `Resumed session: "${sessionData.title}"`,
     ];
   }
 
@@ -611,7 +611,7 @@ export class ClaudeSession {
   resumeLast(): [success: boolean, message: string] {
     const sessions = this.getSessionList();
     if (sessions.length === 0) {
-      return [false, "Nessuna sessione salvata"];
+      return [false, "No saved sessions"];
     }
 
     return this.resumeSession(sessions[0]!.session_id);
