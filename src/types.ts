@@ -24,6 +24,7 @@ export interface SavedSession {
   saved_at: string;
   working_dir: string;
   title: string; // First message truncated (max ~50 chars)
+  session_key?: string; // Per-thread isolation key (see src/ext/session-manager.ts); absent = "default"
 }
 
 export interface SessionHistory {

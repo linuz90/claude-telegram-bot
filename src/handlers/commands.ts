@@ -5,7 +5,7 @@
  */
 
 import type { Context } from "grammy";
-import { session } from "../session";
+import { getSession } from "../ext/session-manager";
 import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
 
@@ -21,6 +21,7 @@ export async function handleStart(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   const status = session.isActive ? "Active session" : "No active session";
   const workDir = WORKING_DIR;
 
@@ -54,6 +55,7 @@ export async function handleNew(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   // Stop any running query
   if (session.isRunning) {
     const result = await session.stop();
@@ -80,6 +82,7 @@ export async function handleStop(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   if (session.isRunning) {
     const result = await session.stop();
     if (result) {
@@ -103,6 +106,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   const lines: string[] = ["📊 <b>Bot Status</b>\n"];
 
   // Session status
@@ -176,6 +180,7 @@ export async function handleResume(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   if (session.isActive) {
     await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
     return;
@@ -270,6 +275,7 @@ export async function handleRetry(ctx: Context): Promise<void> {
     return;
   }
 
+  const session = getSession(ctx);
   // Check if there's a message to retry
   if (!session.lastMessage) {
     await ctx.reply("❌ No message to retry.");

@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 bun run start      # Run the bot
 bun run dev        # Run with auto-reload (--watch)
 bun run typecheck  # Run TypeScript type checking
+bun test           # Run unit tests (colocated *.test.ts)
 bun install        # Install dependencies
 ```
 
@@ -27,7 +28,7 @@ Telegram message → Handler → Auth check → Rate limit → Claude session �
 
 - **`src/index.ts`** - Entry point, registers handlers, starts polling
 - **`src/config.ts`** - Environment parsing, MCP loading, safety prompts
-- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks
+- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks. Takes an optional `sessionKey` (default `"default"`) used to scope saved history per forum topic.
 - **`src/security.ts`** - `RateLimiter` (token bucket), path validation, command safety checks
 - **`src/formatting.ts`** - Markdown→HTML conversion for Telegram, tool status emoji formatting
 - **`src/utils.ts`** - Audit logging, voice transcription (OpenAI), typing indicators
@@ -45,6 +46,10 @@ Each message type has a dedicated async handler:
 - **`video.ts`** - Video messages and video notes
 - **`callback.ts`** - Inline keyboard button handling for ask_user MCP
 - **`streaming.ts`** - Shared `StreamingState` and status callback factory
+
+### Forum topics (`src/ext/`)
+
+- **`session-manager.ts`** - `getSession(ctx)` gives each forum topic (`chatId:message_thread_id`, only when `is_topic_message` is set) its own `ClaudeSession` and `/resume` history; everything outside a topic shares the `"default"` session.
 
 ### Security Layers
 
