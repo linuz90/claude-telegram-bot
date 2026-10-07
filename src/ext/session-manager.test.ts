@@ -5,10 +5,13 @@ import { keyForCtx, getSession, _resetSessionsForTest } from "./session-manager"
 // Minimal fake ctx: keyForCtx/getSession only ever read ctx.msg and ctx.chat,
 // both plain property reads on the real Context class too, so a plain object
 // cast is sufficient and keeps these tests free of any real grammY/Telegram setup.
-function fakeCtx(chatId: number, threadId?: number): Context {
+function fakeCtx(chatId: number, threadId?: number, isTopicMessage = true): Context {
   return {
     chat: { id: chatId },
-    msg: threadId === undefined ? {} : { message_thread_id: threadId },
+    msg:
+      threadId === undefined
+        ? {}
+        : { message_thread_id: threadId, is_topic_message: isTopicMessage || undefined },
   } as unknown as Context;
 }
 
@@ -31,6 +34,10 @@ describe("keyForCtx", () => {
 
   test("same chat+thread always yields the same key", () => {
     expect(keyForCtx(fakeCtx(123, 45))).toBe(keyForCtx(fakeCtx(123, 45)));
+  });
+
+  test("reply chains (General topic, regular supergroups) stay on the 'default' key", () => {
+    expect(keyForCtx(fakeCtx(123, 45, false))).toBe("default");
   });
 });
 

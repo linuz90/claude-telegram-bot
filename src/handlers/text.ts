@@ -35,7 +35,7 @@ export async function handleText(ctx: Context): Promise<void> {
   }
 
   // 2. Check for interrupt prefix
-  message = await checkInterrupt(message);
+  message = await checkInterrupt(message, session);
   if (!message.trim()) {
     return;
   }

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 bun run start      # Run the bot
 bun run dev        # Run with auto-reload (--watch)
 bun run typecheck  # Run TypeScript type checking
-bun test           # Run the test suite (src/ext/**/*.test.ts)
+bun test           # Run unit tests (colocated *.test.ts)
 bun install        # Install dependencies
 ```
 
@@ -26,7 +26,7 @@ Telegram message → Handler → Auth check → Rate limit → Claude session �
 
 - **`src/index.ts`** - Entry point, registers handlers, starts polling
 - **`src/config.ts`** - Environment parsing, MCP loading, safety prompts
-- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks. Takes an optional `sessionKey` (default `"default"`) so `src/ext/session-manager.ts` can give each Telegram forum topic its own instance/history without changing this file's core logic.
+- **`src/session.ts`** - `ClaudeSession` class wrapping Agent SDK V2 with streaming, session persistence (`/tmp/claude-telegram-session.json`), and defense-in-depth safety checks. Takes an optional `sessionKey` (default `"default"`) used to scope saved history per forum topic.
 - **`src/security.ts`** - `RateLimiter` (token bucket), path validation, command safety checks
 - **`src/formatting.ts`** - Markdown→HTML conversion for Telegram, tool status emoji formatting
 - **`src/utils.ts`** - Audit logging, voice transcription (OpenAI), typing indicators
@@ -45,20 +45,9 @@ Each message type has a dedicated async handler:
 - **`callback.ts`** - Inline keyboard button handling for ask_user MCP
 - **`streaming.ts`** - Shared `StreamingState` and status callback factory
 
-### Extensions (`src/ext/`)
+### Forum topics (`src/ext/`)
 
-Self-contained additions kept out of the files above so upstream (`linuz90/claude-telegram-bot`)
-rebases stay clean - the only touches outside this directory are the small additive diffs noted
-in `session.ts`, `types.ts`, and `index.ts`'s middleware registration.
-
-- **`session-manager.ts`** - `getSession(ctx)` routes each Telegram forum topic
-  (`message_thread_id`) to its own `ClaudeSession` instance; messages outside a topic keep using
-  the single pre-existing `"default"` session, unchanged.
-- **`thread-routing.ts`** - forces every outgoing Bot API call for the update being processed to
-  carry the correct `message_thread_id` (AsyncLocalStorage + a raw API transformer). Needed
-  because grammY's own `ctx.reply()`/etc. shortcuts only attach it when Telegram's
-  `is_topic_message` flag happens to be set, which isn't reliable enough on its own.
-- Tests: `bun test` (colocated `*.test.ts` files).
+- **`session-manager.ts`** - `getSession(ctx)` gives each forum topic (`chatId:message_thread_id`, only when `is_topic_message` is set) its own `ClaudeSession` and `/resume` history; everything outside a topic shares the `"default"` session.
 
 ### Security Layers
 

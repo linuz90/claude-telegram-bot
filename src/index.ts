@@ -25,17 +25,9 @@ import {
   handleCallback,
 } from "./handlers";
 import { keyForCtx } from "./ext/session-manager";
-import { threadContextMiddleware, installThreadApiTransformer } from "./ext/thread-routing";
 
 // Create bot instance
 const bot = new Bot(TELEGRAM_TOKEN);
-
-// Force every outgoing reply/typing-indicator/etc. for this update to carry
-// the correct message_thread_id, instead of relying on grammY's shortcuts
-// (which only do this when Telegram's is_topic_message flag happens to be
-// set - not reliable enough on its own for forum topics to feel correct).
-installThreadApiTransformer(bot);
-bot.use(threadContextMiddleware);
 
 // Sequentialize non-command messages per user (prevents race conditions)
 // Commands bypass sequentialization so they work immediately

@@ -10,7 +10,7 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import type { Context } from "grammy";
 import {
   ALLOWED_PATHS,
@@ -534,8 +534,9 @@ export class ClaudeSession {
       // Keep only the last MAX_SESSIONS
       history.sessions = history.sessions.slice(0, MAX_SESSIONS);
 
-      // Save
-      Bun.write(SESSION_FILE, JSON.stringify(history, null, 2));
+      // Sync write: per-topic sessions can save concurrently, and an unawaited
+      // Bun.write would let one read-modify-write drop another's entry.
+      writeFileSync(SESSION_FILE, JSON.stringify(history, null, 2));
       console.log(`Session saved to ${SESSION_FILE}`);
     } catch (error) {
       console.warn(`Failed to save session: ${error}`);
@@ -616,6 +617,3 @@ export class ClaudeSession {
     return this.resumeSession(sessions[0]!.session_id);
   }
 }
-
-// Global session instance
-export const session = new ClaudeSession();
