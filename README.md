@@ -36,8 +36,8 @@ To achieve this, I set up a folder with a CLAUDE.md that teaches Claude about me
 ## Quick Start
 
 ```bash
-git clone https://github.com/linuz90/claude-telegram-bot?tab=readme-ov-file
-cd claude-telegram-bot-ts
+git clone https://github.com/linuz90/claude-telegram-bot
+cd claude-telegram-bot
 
 cp .env.example .env
 # Edit .env with your credentials
